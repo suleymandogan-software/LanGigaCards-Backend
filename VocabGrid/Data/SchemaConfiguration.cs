@@ -51,6 +51,11 @@ internal static class SchemaConfiguration
             // 512: bugünkü token 88 karakter (64 baytın base64'ü), ama üretim
             // biçimi değişirse diye pay bırakıldı.
             e.Property(u => u.RefreshToken).HasMaxLength(512);
+
+            // IPasswordHasher'ın v3 biçimi 84 karakter; 256, tur sayısı ya da
+            // algoritma değişirse diye pay bırakıyor. Sınır olmadan sütun
+            // nvarchar(max) olurdu: indekslenemez ve sayfa dışında saklanır.
+            e.Property(u => u.PasswordHash).HasMaxLength(256);
         });
 
         modelBuilder.Entity<Vocabulary>(e =>

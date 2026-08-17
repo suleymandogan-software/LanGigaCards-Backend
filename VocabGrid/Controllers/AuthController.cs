@@ -3,6 +3,8 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Apis.Auth;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -10,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using VocabGrid.DTOs;
 using VocabGrid.Entities;
 using VocabGrid.Interfaces;
+using VocabGrid.Services;
 
 namespace VocabGrid.Controllers;
 
@@ -42,20 +45,24 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
     private readonly IHostEnvironment _environment;
+    private readonly IPasswordHasher<User> _passwordHasher;
 
     public AuthController(
         IUnitOfWork unitOfWork,
         IConfiguration configuration,
         IEmailService emailService,
-        IHostEnvironment environment)
+        IHostEnvironment environment,
+        IPasswordHasher<User> passwordHasher)
     {
         _unitOfWork = unitOfWork;
         _configuration = configuration;
         _emailService = emailService;
         _environment = environment;
+        _passwordHasher = passwordHasher;
     }
 
     [HttpPost("register")]
+    [EnableRateLimiting(RateLimitPolicies.Registration)]
     public async Task<IActionResult> Register([FromBody] RegisterDto request)
     {
         if (!ModelState.IsValid)
@@ -71,18 +78,15 @@ public class AuthController : ControllerBase
             return BadRequest("User with this email already exists.");
         }
 
-        CreatePasswordHash(request.Password, out byte[] passwordHash, out byte[] passwordSalt);
-
         var user = new User
         {
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             Username = request.Email.Split('@')[0],
             Email = request.Email.Trim().ToLowerInvariant(),
-            PasswordHash = passwordHash,
-            PasswordSalt = passwordSalt,
             Settings = new UserSettings()
         };
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
 
         await userRepository.AddAsync(user);
         await IssueRefreshTokenAsync(user);
@@ -99,6 +103,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting(RateLimitPolicies.Credentials)]
     public async Task<IActionResult> Login([FromBody] UserLoginDto request)
     {
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
@@ -110,7 +115,7 @@ public class AuthController : ControllerBase
         var users = await userRepository.FindAsync(u => u.Email.ToLower() == request.Email.Trim().ToLowerInvariant());
         var user = users.FirstOrDefault();
 
-        if (user == null || !VerifyPasswordHash(request.Password, user.PasswordHash, user.PasswordSalt))
+        if (user == null || !VerifyPassword(user, request.Password))
         {
             return Unauthorized("Invalid credentials.");
         }
@@ -152,6 +157,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("forgot-password")]
+    [EnableRateLimiting(RateLimitPolicies.Registration)]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto request)
     {
         if (!ModelState.IsValid)
@@ -194,6 +200,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("send-verification-code")]
+    [EnableRateLimiting(RateLimitPolicies.Registration)]
     public async Task<IActionResult> SendEmailVerificationCode([FromBody] SendEmailVerificationDto request)
     {
         if (!ModelState.IsValid)
@@ -229,6 +236,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("verify-email")]
+    [EnableRateLimiting(RateLimitPolicies.Credentials)]
     public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto request)
     {
         if (!ModelState.IsValid)
@@ -297,6 +305,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("reset-password")]
+    [EnableRateLimiting(RateLimitPolicies.Credentials)]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto request)
     {
         if (!ModelState.IsValid)
@@ -322,9 +331,7 @@ public class AuthController : ControllerBase
             return BadRequest("Invalid, expired, or already used password reset token.");
         }
 
-        CreatePasswordHash(request.NewPassword, out byte[] passwordHash, out byte[] passwordSalt);
-        user.PasswordHash = passwordHash;
-        user.PasswordSalt = passwordSalt;
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
         user.RefreshToken = null;
         user.RefreshTokenExpiryTime = null;
 
@@ -499,8 +506,9 @@ public class AuthController : ControllerBase
                 Email = email.ToLowerInvariant(),
                 GoogleId = googleId,
                 AppleId = appleId,
-                PasswordHash = Array.Empty<byte>(),
-                PasswordSalt = Array.Empty<byte>(),
+                // Boş: bu hesabın parolası yok, kimlik sağlayıcı üzerinden
+                // giriliyor. VerifyPassword bu durumu ayrıca reddediyor.
+                PasswordHash = string.Empty,
                 Settings = new UserSettings()
             };
 
@@ -649,22 +657,25 @@ public class AuthController : ControllerBase
         return tokenHandler.WriteToken(token);
     }
 
-    private static void CreatePasswordHash(string password, out byte[] passwordHash, out byte[] passwordSalt)
+    /// <summary>
+    /// Parolayı <see cref="IPasswordHasher{TUser}"/> ile doğrular.
+    ///
+    /// Buradaki eski uygulama tek turluk bir HMACSHA512'ydi: tuz vardı ama iş
+    /// faktörü yoktu, yani hash sızarsa parolalar donanım hızında denenebilirdi.
+    /// ASP.NET'in varsayılanı ise 100.000 turluk PBKDF2-HMAC-SHA256 ve
+    /// karşılaştırmayı sabit zamanda yapıyor.
+    ///
+    /// Boş hash sosyal girişle açılmış, parolası olmayan bir hesabı gösterir;
+    /// böyle bir hesap parolayla giriş yapamaz.
+    /// </summary>
+    private bool VerifyPassword(User user, string password)
     {
-        using var hmac = new HMACSHA512();
-        passwordSalt = hmac.Key;
-        passwordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
-    }
-
-    private static bool VerifyPasswordHash(string password, byte[] passwordHash, byte[] passwordSalt)
-    {
-        if (passwordHash.Length == 0 || passwordSalt.Length == 0)
+        if (string.IsNullOrEmpty(user.PasswordHash))
         {
             return false;
         }
 
-        using var hmac = new HMACSHA512(passwordSalt);
-        var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return computedHash.SequenceEqual(passwordHash);
+        return _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password)
+            != PasswordVerificationResult.Failed;
     }
 }

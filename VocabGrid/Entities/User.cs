@@ -9,8 +9,15 @@ public class User
     public string LastName { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
-    public byte[] PasswordHash { get; set; } = Array.Empty<byte>();
-    public byte[] PasswordSalt { get; set; } = Array.Empty<byte>();
+    /// <summary>
+    /// ASP.NET Core'un <c>IPasswordHasher</c>'ının ürettiği kodlanmış hash:
+    /// sürüm baytı, tuz, tur sayısı ve türetilmiş anahtar tek bir base64
+    /// dizede. Ayrı bir tuz sütunu yok, tuz bu değerin içinde.
+    ///
+    /// Sosyal girişle açılan hesaplarda boş kalır; parola doğrulaması o
+    /// hesaplar için hiç çalıştırılmaz.
+    /// </summary>
+    public string PasswordHash { get; set; } = string.Empty;
 
     /// <summary>Profil görseli URL; yoksa UI initials kullanır.</summary>
     public string? AvatarUrl { get; set; }
