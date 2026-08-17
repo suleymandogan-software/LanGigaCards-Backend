@@ -55,8 +55,13 @@ public class User
     /// </summary>
     public bool IsEmailVerified { get; set; }
 
-    public string? RefreshToken { get; set; }
-    public DateTime? RefreshTokenExpiryTime { get; set; }
+    /// <summary>
+    /// Bu hesabın açık oturumları — cihaz başına bir satır. Eskiden
+    /// <c>User</c> üzerinde tek bir token sütunu vardı, bu yüzden ikinci
+    /// cihazdan giriş birincinin oturumunu düşürüyordu. Bkz.
+    /// <see cref="Entities.RefreshToken"/>.
+    /// </summary>
+    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

@@ -27,6 +27,7 @@ namespace VocabGrid.Data
         public DbSet<Deck> Decks { get; set; }
         public DbSet<StudyActivity> StudyActivities { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; }
         public DbSet<Language> Languages { get; set; }
         public DbSet<Tag> Tags { get; set; }
@@ -267,6 +268,25 @@ namespace VocabGrid.Data
 
             modelBuilder.Entity<StudyActivity>()
                 .HasIndex(a => new { a.UserId, a.OccurredAt });
+
+            modelBuilder.Entity<RefreshToken>(e =>
+            {
+                e.HasOne(t => t.User)
+                    .WithMany(u => u.RefreshTokens)
+                    .HasForeignKey(t => t.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // 44: 32 baytlık SHA-256 özetinin base64'ü tam olarak bu
+                // uzunlukta. Sınır olmasa sütun nvarchar(max) olur ve
+                // indekslenemezdi — oysa her yenileme isteği tam bu sütunda
+                // arama yapıyor.
+                e.Property(t => t.TokenHash).HasMaxLength(44);
+                e.HasIndex(t => t.TokenHash).IsUnique();
+
+                // "Bu kullanıcının açık oturumları": çıkışta hepsini iptal
+                // etmek ve süresi geçmişleri temizlemek bu sorguyu kullanıyor.
+                e.HasIndex(t => new { t.UserId, t.ExpiresAt });
+            });
 
             modelBuilder.Entity<PasswordResetToken>()
                 .HasOne(t => t.User)

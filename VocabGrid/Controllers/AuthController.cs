@@ -5,6 +5,7 @@ using System.Text;
 using Google.Apis.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -89,7 +90,7 @@ public class AuthController : ControllerBase
         user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
 
         await userRepository.AddAsync(user);
-        await IssueRefreshTokenAsync(user);
+        var refreshToken = await IssueRefreshTokenAsync(user);
         await _unitOfWork.CompleteAsync();
 
         // The client moves straight to its "Verify Your Email" step after this
@@ -99,7 +100,7 @@ public class AuthController : ControllerBase
         await _unitOfWork.CompleteAsync();
         await _emailService.SendEmailVerificationCodeAsync(user.Email, verificationCode);
 
-        return Ok(BuildAuthResponse("Registration successful.", user));
+        return Ok(BuildAuthResponse("Registration successful.", user, refreshToken));
     }
 
     [HttpPost("login")]
@@ -120,11 +121,10 @@ public class AuthController : ControllerBase
             return Unauthorized("Invalid credentials.");
         }
 
-        await IssueRefreshTokenAsync(user);
-        userRepository.Update(user);
+        var refreshToken = await IssueRefreshTokenAsync(user);
         await _unitOfWork.CompleteAsync();
 
-        return Ok(BuildAuthResponse("Login successful.", user));
+        return Ok(BuildAuthResponse("Login successful.", user, refreshToken));
     }
 
     [HttpPost("refresh")]
@@ -135,24 +135,33 @@ public class AuthController : ControllerBase
             return BadRequest("Refresh token is required.");
         }
 
-        var userRepository = _unitOfWork.Repository<User>();
-        var users = await userRepository.FindAsync(u => u.RefreshToken == request.RefreshToken);
-        var user = users.FirstOrDefault();
+        var now = DateTime.UtcNow;
+        var hash = HashRefreshToken(request.RefreshToken);
 
-        if (user is null || user.RefreshTokenExpiryTime is null || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
+        var stored = await _unitOfWork.Repository<RefreshToken>().Query()
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.TokenHash == hash);
+
+        if (stored is null || !stored.IsActive(now) || stored.User is null)
         {
             return Unauthorized("Invalid or expired refresh token.");
         }
 
-        await IssueRefreshTokenAsync(user);
-        userRepository.Update(user);
+        // Dönüşümlü kullanım: her yenileme eskisini iptal eder, yani bir
+        // token yalnızca bir kez işe yarar. Satır silinmiyor — iptal edilmiş
+        // bir token'ın yeniden sunulması çalındığına dair bir işarettir ve
+        // bunu görebilmek için kaydın durması gerekir.
+        stored.RevokedAt = now;
+        _unitOfWork.Repository<RefreshToken>().Update(stored);
+
+        var refreshToken = await IssueRefreshTokenAsync(stored.User);
         await _unitOfWork.CompleteAsync();
 
         return Ok(new
         {
-            Token = CreateToken(user),
-            RefreshToken = user.RefreshToken,
-            RefreshTokenExpiryTime = user.RefreshTokenExpiryTime
+            Token = CreateToken(stored.User),
+            RefreshToken = refreshToken.Token,
+            RefreshTokenExpiryTime = refreshToken.ExpiresAt
         });
     }
 
@@ -332,8 +341,22 @@ public class AuthController : ControllerBase
         }
 
         user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
-        user.RefreshToken = null;
-        user.RefreshTokenExpiryTime = null;
+
+        // Parola sıfırlandığında bütün cihazlardaki oturumlar düşer. Eskiden
+        // tek token sütunu temizleniyordu; artık her cihazın kendi satırı
+        // olduğu için hepsini tek tek iptal etmek gerekiyor — aksi halde
+        // parolayı ele geçirmiş biri, kurban parolayı değiştirdikten sonra
+        // da kendi cihazında oturumda kalırdı.
+        var now = DateTime.UtcNow;
+        var refreshTokenRepository = _unitOfWork.Repository<RefreshToken>();
+        var activeTokens = await refreshTokenRepository.Query()
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        foreach (var active in activeTokens)
+        {
+            active.RevokedAt = now;
+            refreshTokenRepository.Update(active);
+        }
 
         tokenEntity.IsUsed = true;
 
@@ -388,11 +411,10 @@ public class AuthController : ControllerBase
             email: email,
             displayName: displayName);
 
-        await IssueRefreshTokenAsync(user);
-        _unitOfWork.Repository<User>().Update(user);
+        var refreshToken = await IssueRefreshTokenAsync(user);
         await _unitOfWork.CompleteAsync();
 
-        return Ok(BuildAuthResponse("Google authentication successful.", user, includeGoogleId: true));
+        return Ok(BuildAuthResponse("Google authentication successful.", user, refreshToken, includeGoogleId: true));
     }
 
     [HttpPost("apple")]
@@ -450,11 +472,10 @@ public class AuthController : ControllerBase
             email: email ?? existingByApple!.Email,
             displayName: displayName);
 
-        await IssueRefreshTokenAsync(user);
-        userRepository.Update(user);
+        var refreshToken = await IssueRefreshTokenAsync(user);
         await _unitOfWork.CompleteAsync();
 
-        return Ok(BuildAuthResponse("Apple authentication successful.", user, includeAppleId: true));
+        return Ok(BuildAuthResponse("Apple authentication successful.", user, refreshToken, includeAppleId: true));
     }
 
     private async Task<User> FindOrLinkSocialUserAsync(
@@ -519,12 +540,44 @@ public class AuthController : ControllerBase
         return user;
     }
 
-    private Task IssueRefreshTokenAsync(User user)
+    /// <summary>
+    /// Bu cihaz için yeni bir yenileme token'ı üretir ve yalnızca özetini
+    /// saklar. Düz metin hali yalnızca burada, bir kez görülür; çağıran onu
+    /// yanıta koyar.
+    ///
+    /// Var olan satırlara dokunmaz: her cihaz kendi satırını taşır, ikinci
+    /// bir cihazdan giriş yapmak birincinin oturumunu düşürmez.
+    /// </summary>
+    private async Task<IssuedRefreshToken> IssueRefreshTokenAsync(User user)
     {
-        user.RefreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        user.RefreshTokenExpiryTime = DateTime.UtcNow.Add(RefreshTokenLifetime);
-        return Task.CompletedTask;
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var now = DateTime.UtcNow;
+        var expiresAt = now.Add(RefreshTokenLifetime);
+
+        await _unitOfWork.Repository<RefreshToken>().AddAsync(new RefreshToken
+        {
+            // UserId değil User: kayıt sırasında bu çağrı kullanıcı henüz
+            // kaydedilmeden yapılıyor, dolayısıyla Id hâlâ 0 olur ve yabancı
+            // anahtar kısıtı patlar. Navigasyon üzerinden bağlandığında EF
+            // kullanıcıyı önce ekler ve Id'yi buraya kendisi yazar.
+            User = user,
+            TokenHash = HashRefreshToken(token),
+            CreatedAt = now,
+            ExpiresAt = expiresAt
+        });
+
+        return new IssuedRefreshToken(token, expiresAt);
     }
+
+    /// <summary>
+    /// Token 64 rastgele bayt, tahmin edilebilir bir parola değil; bu yüzden
+    /// parola hash'inin aksine iş faktörü gerekmiyor. Tek amaç, veritabanı
+    /// okuması sızarsa token'ların doğrudan kullanılabilir olmaması.
+    /// </summary>
+    private static string HashRefreshToken(string token) =>
+        Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    private sealed record IssuedRefreshToken(string Token, DateTime ExpiresAt);
 
     /// <summary>
     /// Retires any code the user still has outstanding and issues a fresh one.
@@ -560,6 +613,7 @@ public class AuthController : ControllerBase
     private object BuildAuthResponse(
         string message,
         User user,
+        IssuedRefreshToken refreshToken,
         bool includeGoogleId = false,
         bool includeAppleId = false)
     {
@@ -573,8 +627,8 @@ public class AuthController : ControllerBase
         {
             Message = message,
             Token = CreateToken(user),
-            RefreshToken = user.RefreshToken,
-            RefreshTokenExpiryTime = user.RefreshTokenExpiryTime,
+            RefreshToken = refreshToken.Token,
+            RefreshTokenExpiryTime = refreshToken.ExpiresAt,
             User = userPayload
         };
     }
