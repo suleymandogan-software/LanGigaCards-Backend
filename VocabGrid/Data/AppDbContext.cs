@@ -181,6 +181,16 @@ namespace VocabGrid.Data
                 .HasForeignKey(v => v.DeckId)
                 .OnDelete(DeleteBehavior.ClientCascade);
 
+            // SetNull, Cascade değil: kategori bir sınıflandırma etiketi, sahip
+            // değil. Katalogdan bir kategori kaldırılırsa kelimeler kalmalı —
+            // aksi halde tek bir katalog düzenlemesi müfredatın bir bölümünü ve
+            // ona bağlı tüm UserWordProgress ilerlemesini birlikte silerdi.
+            modelBuilder.Entity<Vocabulary>()
+                .HasOne(v => v.Category)
+                .WithMany(c => c.Vocabularies)
+                .HasForeignKey(v => v.CategoryId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             modelBuilder.Entity<Quiz>()
                 .HasOne(q => q.Lesson)
                 .WithMany(l => l.Quizzes)
@@ -393,6 +403,10 @@ namespace VocabGrid.Data
 
             // 11-20. dersler ve 120 kelimelik B1-B2 bloğu.
             CurriculumSeedDataB1.Apply(modelBuilder);
+
+            // 21-24. dersler: katalogdaki dört kategorinin (Movies, Gaming,
+            // Science, Animals) tek bir kelimesi yoktu.
+            CurriculumSeedDataInterests.Apply(modelBuilder);
 
             modelBuilder.Entity<Quiz>().HasData(
                 new Quiz { QuizID = 1, LessonID = 1, QuestionText = "What does 'Merhaba' mean?", QuestionType = "MultipleChoice", Points = 1, TimeLimitSeconds = 20 },

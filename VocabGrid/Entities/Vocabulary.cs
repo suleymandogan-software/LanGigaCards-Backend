@@ -14,6 +14,19 @@ public class Vocabulary
     public int? DeckId { get; set; }
     public Deck? Deck { get; set; }
 
+    /// <summary>
+    /// Kelimenin konu kategorisi. Onboarding'de seçilen kategoriler
+    /// (<see cref="UserCategory"/>) çalışma oturumunu bu sütun üzerinden
+    /// filtreler; kategori seçimi bu bağ kurulmadan önce hiçbir sorguya
+    /// girmiyordu.
+    ///
+    /// Null olabilir: öğrencinin kendi destesine eklediği kart bir kategoriye
+    /// ait olmak zorunda değil. Böyle kartlar kategori oturumuna girmez,
+    /// kendi destesinden çalışılır.
+    /// </summary>
+    public int? CategoryId { get; set; }
+    public Category? Category { get; set; }
+
     /// <summary>FRONT (target word)</summary>
     public string Term { get; set; } = string.Empty;
 

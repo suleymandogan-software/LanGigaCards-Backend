@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using VocabGrid.DTOs;
 using VocabGrid.Entities;
 using VocabGrid.Interfaces;
@@ -13,6 +14,15 @@ namespace VocabGrid.Controllers;
 [Authorize]
 public class ProgressController : ControllerBase
 {
+    /// <summary>Dereceli oturumda bir seferde gösterilecek en fazla kart.</summary>
+    private const int MaxSessionLimit = 100;
+
+    /// <summary>
+    /// "all" modunun tavanı. Oturum tavanından yüksek çünkü orası bir çalışma
+    /// oturumu değil, kullanıcının kategorilerindeki kelimelerin listesi.
+    /// </summary>
+    private const int MaxBrowseLimit = 500;
+
     private readonly IUnitOfWork _unitOfWork;
 
     public ProgressController(IUnitOfWork unitOfWork)
@@ -130,6 +140,174 @@ public class ProgressController : ControllerBase
             NewlyUnlockedAchievements = newlyUnlocked.Select(badge => new { badge.Id, badge.Name, badge.Description, badge.Icon })
         });
     }
+
+    /// <summary>
+    /// Kullanıcının seçtiği kategorilerden bir çalışma oturumu.
+    ///
+    /// <c>mode</c>:
+    ///   <c>new</c>    — yalnızca hiç görülmemiş kelimeler
+    ///   <c>review</c> — yalnızca zamanı gelmiş tekrarlar
+    ///   <c>mixed</c>  — önce tekrarlar, kalan yer yeni kelimelerle dolar
+    ///   <c>all</c>    — tekrar durumuna bakmadan hepsi (salt okunur listeleme)
+    ///
+    /// Yalnızca müfredat kelimelerini (<c>DeckId == null</c>) döndürür:
+    /// kategori seçimi paylaşılan içerik içindir, kullanıcının kendi destesi
+    /// zaten <see cref="GetDueReviews"/> ile çalışılıyor.
+    /// </summary>
+    [HttpGet("session")]
+    [ProducesResponseType(typeof(IEnumerable<SessionCardDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCategorySession(
+        [FromQuery] string mode = "mixed",
+        [FromQuery] int limit = 50)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (mode is not ("new" or "review" or "mixed" or "all"))
+        {
+            return BadRequest("mode must be new, review, mixed, or all.");
+        }
+
+        // "all" bir oturum değil, listeleme: oturum tavanı uygulanırsa
+        // kullanıcının kelimelerinin yalnızca ilk 50'si görünür.
+        var maximum = mode == "all" ? MaxBrowseLimit : MaxSessionLimit;
+        if (limit < 1 || limit > maximum)
+        {
+            return BadRequest($"limit must be between 1 and {maximum} for mode '{mode}'.");
+        }
+
+        var categoryIds = await SelectedCategoryIdsAsync(userId.Value);
+        if (categoryIds.Count == 0)
+        {
+            return Ok(Array.Empty<SessionCardDto>());
+        }
+
+        var pool = _unitOfWork.Repository<Vocabulary>().Query()
+            .Where(word => word.DeckId == null
+                && word.CategoryId != null
+                && categoryIds.Contains(word.CategoryId.Value));
+
+        var progress = _unitOfWork.Repository<UserWordProgress>().Query()
+            .Where(row => row.UserID == userId.Value);
+
+        if (mode == "all")
+        {
+            return Ok(await pool
+                .OrderBy(word => word.Term)
+                .Take(limit)
+                .Select(word => new SessionCardDto
+                {
+                    WordId = word.WordID,
+                    CategoryId = word.CategoryId,
+                    Term = word.Term,
+                    Translation = word.Translation,
+                    ExampleSentence = word.ExampleSentence,
+                    ImageUrl = word.ImageUrl,
+                    AudioUrl = word.AudioUrl,
+                    MasteryLevel = 0,
+                    IsNew = false
+                })
+                .ToListAsync());
+        }
+
+        var now = DateTime.UtcNow;
+        var cards = new List<SessionCardDto>();
+
+        if (mode is "review" or "mixed")
+        {
+            cards.AddRange(await progress
+                .Where(row => row.NextReviewDate != null
+                    && row.NextReviewDate <= now
+                    && pool.Any(word => word.WordID == row.WordID))
+                .OrderBy(row => row.NextReviewDate)
+                .Take(limit)
+                .Select(row => new SessionCardDto
+                {
+                    WordId = row.Vocabulary!.WordID,
+                    CategoryId = row.Vocabulary.CategoryId,
+                    Term = row.Vocabulary.Term,
+                    Translation = row.Vocabulary.Translation,
+                    ExampleSentence = row.Vocabulary.ExampleSentence,
+                    ImageUrl = row.Vocabulary.ImageUrl,
+                    AudioUrl = row.Vocabulary.AudioUrl,
+                    MasteryLevel = row.MasteryLevel,
+                    IsNew = false
+                })
+                .ToListAsync());
+        }
+
+        if (mode is "new" or "mixed" && cards.Count < limit)
+        {
+            cards.AddRange(await pool
+                .Where(word => !progress.Any(row => row.WordID == word.WordID))
+                .OrderBy(word => word.WordID)
+                .Take(limit - cards.Count)
+                .Select(word => new SessionCardDto
+                {
+                    WordId = word.WordID,
+                    CategoryId = word.CategoryId,
+                    Term = word.Term,
+                    Translation = word.Translation,
+                    ExampleSentence = word.ExampleSentence,
+                    ImageUrl = word.ImageUrl,
+                    AudioUrl = word.AudioUrl,
+                    MasteryLevel = 0,
+                    IsNew = true
+                })
+                .ToListAsync());
+        }
+
+        return Ok(cards);
+    }
+
+    /// <summary>
+    /// Seçili kategorilerde kaç yeni ve kaç zamanı gelmiş kelime olduğu.
+    /// Mod düğmeleri boş bir oturum açmadan önce bunu okuyor.
+    /// </summary>
+    [HttpGet("session/counts")]
+    [ProducesResponseType(typeof(SessionCountsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSessionCounts()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var categoryIds = await SelectedCategoryIdsAsync(userId.Value);
+        if (categoryIds.Count == 0)
+        {
+            return Ok(new SessionCountsDto());
+        }
+
+        var pool = _unitOfWork.Repository<Vocabulary>().Query()
+            .Where(word => word.DeckId == null
+                && word.CategoryId != null
+                && categoryIds.Contains(word.CategoryId.Value));
+
+        var progress = _unitOfWork.Repository<UserWordProgress>().Query()
+            .Where(row => row.UserID == userId.Value);
+
+        var now = DateTime.UtcNow;
+
+        return Ok(new SessionCountsDto
+        {
+            SelectedCategories = categoryIds.Count,
+            NewAvailable = await pool.CountAsync(word => !progress.Any(row => row.WordID == word.WordID)),
+            DueCount = await progress.CountAsync(row => row.NextReviewDate != null
+                && row.NextReviewDate <= now
+                && pool.Any(word => word.WordID == row.WordID))
+        });
+    }
+
+    private async Task<List<int>> SelectedCategoryIdsAsync(int userId) =>
+        await _unitOfWork.Repository<UserCategory>().Query()
+            .Where(link => link.UserId == userId)
+            .Select(link => link.CategoryId)
+            .ToListAsync();
 
     [HttpGet("reviews/due")]
     public async Task<IActionResult> GetDueReviews([FromQuery] int? deckId, [FromQuery] int take = 50)

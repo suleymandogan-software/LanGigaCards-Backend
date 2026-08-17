@@ -142,6 +142,12 @@ internal static class SchemaConfiguration
             e.HasIndex(v => new { v.DeckId, v.Term });
             e.HasIndex(v => v.Term);
             e.HasIndex(v => v.Translation);
+
+            // Kategori oturumu "seçili kategorilerdeki deste-siz müfredat
+            // kelimeleri" diye soruyor, yani iki sütunu birlikte süzüyor.
+            // CategoryId önde çünkü seçicilik orada: DeckId'nin ayırt ettiği
+            // tek şey müfredat kelimesi mi kullanıcı kartı mı olduğu.
+            e.HasIndex(v => new { v.CategoryId, v.DeckId });
         });
 
         // Ders listesi her zaman OrderIndex'e göre sıralanıyor.

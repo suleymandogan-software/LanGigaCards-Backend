@@ -187,6 +187,25 @@ internal static class CurriculumSeedDataB1
         (5120, 20, "Disagree",     "Karşı çıkmak",  "It is fine to disagree politely."),
     };
 
+    /// <summary>
+    /// Her dersin <see cref="Category"/> karşılığı — bkz.
+    /// <see cref="CurriculumSeedData"/>'daki aynı isimli eşleme. Bu blokta
+    /// dersler tek konuya oturduğu için istisna yok.
+    /// </summary>
+    private static readonly Dictionary<int, int> LessonCategory = new()
+    {
+        [11] = 13, // Weather           -> Nature
+        [12] = 12, // Feelings          -> Family
+        [13] = 11, // Shopping          -> Shopping
+        [14] = 4,  // Technology        -> Technology
+        [15] = 13, // Nature            -> Nature
+        [16] = 9,  // Sports            -> Sports
+        [17] = 7,  // Music and Art     -> Music
+        [18] = 1,  // Cooking           -> Food
+        [19] = 3,  // Money and Banking -> Business
+        [20] = 5,  // Communication     -> Education
+    };
+
     internal static void Apply(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Lesson>().HasData(Lessons.Select(lesson => new Lesson
@@ -205,6 +224,7 @@ internal static class CurriculumSeedDataB1
             // DeckId null: bu kelimeler kimsenin destesine ait değil, derse
             // bağlı oldukları için herkesin tekrar kuyruğuna girerler.
             DeckId = null,
+            CategoryId = LessonCategory[word.LessonId],
             Term = word.Term,
             Translation = word.Translation,
             ExampleSentence = word.Example,

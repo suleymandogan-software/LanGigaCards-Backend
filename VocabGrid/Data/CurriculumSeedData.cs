@@ -184,6 +184,47 @@ internal static class CurriculumSeedData
         (1118, 10, "Money", "Para", "I forgot my money at home."),
     };
 
+    /// <summary>
+    /// Her dersin <see cref="Category"/> karşılığı. Kategori kimlikleri
+    /// <c>AppDbContext</c>'teki katalog seed'inden gelir.
+    ///
+    /// Eşleme ders düzeyinde tutuluyor çünkü bir dersin kelimeleri zaten tek
+    /// bir konuyu paylaşıyor; tek istisna <see cref="LessonCategoryOverrides"/>
+    /// ile ele alınıyor. 1 ve 2 numaralı dersler burada listeli ama
+    /// <c>Lessons</c> dizisinde yok — onlar <c>AppDbContext</c>'te tanımlı,
+    /// kelimeleri ise bu dosyada.
+    /// </summary>
+    private static readonly Dictionary<int, int> LessonCategory = new()
+    {
+        [1] = 12,  // Greetings          -> Family
+        [2] = 1,   // Food Basics        -> Food
+        [3] = 5,   // Numbers            -> Education
+        [4] = 5,   // Time and Days      -> Education
+        [5] = 12,  // Family             -> Family
+        [6] = 5,   // Colours            -> Education
+        [7] = 2,   // Travel/Directions  -> Travel
+        [8] = 5,   // Work and School    -> Education (iş kelimeleri hariç, aşağıda)
+        [9] = 10,  // Body and Health    -> Health
+        [10] = 12, // Home and Daily Life-> Family
+    };
+
+    /// <summary>
+    /// "Work and School" tek ders ama iki konuya bakıyor: ilk üç kelime iş
+    /// hayatına, kalanı okula ait. Dersi bölmek yerine bu üç kelimeyi
+    /// Business'a taşımak, ders sırasını bozmadan doğru sonucu veriyor.
+    /// </summary>
+    private static readonly Dictionary<int, int> LessonCategoryOverrides = new()
+    {
+        [1083] = 3, // Work    -> Business
+        [1084] = 3, // Office  -> Business
+        [1085] = 3, // Meeting -> Business
+    };
+
+    private static int CategoryOf(int wordId, int lessonId) =>
+        LessonCategoryOverrides.TryGetValue(wordId, out var overridden)
+            ? overridden
+            : LessonCategory[lessonId];
+
     public static void Apply(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Lesson>().HasData(
@@ -204,6 +245,7 @@ internal static class CurriculumSeedData
                 // Deliberately null: a curriculum word belongs to the shared
                 // lesson plan, not to any learner's deck.
                 DeckId = null,
+                CategoryId = CategoryOf(word.WordId, word.LessonId),
                 Term = word.Term,
                 Translation = word.Translation,
                 ExampleSentence = word.Example,

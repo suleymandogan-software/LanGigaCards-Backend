@@ -20,4 +20,7 @@ public class Category
     public string ColorHex { get; set; } = string.Empty;
 
     public ICollection<UserCategory> UserCategories { get; set; } = new List<UserCategory>();
+
+    /// <summary>Bu kategoriye bağlı müfredat kelimeleri.</summary>
+    public ICollection<Vocabulary> Vocabularies { get; set; } = new List<Vocabulary>();
 }
