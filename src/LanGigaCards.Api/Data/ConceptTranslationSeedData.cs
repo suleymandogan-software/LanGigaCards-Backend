@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using LanGigaCards.Api.Entities;
 
 namespace LanGigaCards.Api.Data;
 
@@ -88,12 +87,12 @@ internal static class ConceptTranslationSeedData
         },
     };
 
-    /// <param name="conceptKeys">
-    /// <see cref="ConceptSeedData"/>'daki kavram anahtarları, sırasıyla —
-    /// kimlikler bu dizideki konumdan türüyor. Buradaki bir yazım hatası
-    /// sessizce eksik çeviriye dönüşmesin diye, eşleşmeyen anahtar
-    /// açılışta istisna fırlatır.
-    /// </param>
+    /// <remarks>
+    /// <c>conceptKeys</c>, <see cref="ConceptSeedData"/>'daki kavram
+    /// anahtarlarıdır, sırasıyla — kimlikler bu dizideki konumdan türüyor.
+    /// Buradaki bir yazım hatası sessizce eksik çeviriye dönüşmesin diye,
+    /// eşleşmeyen anahtar açılışta istisna fırlatır.
+    /// </remarks>
     internal static void Apply(ModelBuilder modelBuilder, string[] conceptKeys)
     {
         var idByKey = conceptKeys

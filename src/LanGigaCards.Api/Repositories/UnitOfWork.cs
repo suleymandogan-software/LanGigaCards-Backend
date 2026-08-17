@@ -1,8 +1,4 @@
-﻿using LanGigaCards.Api.Data;
-using LanGigaCards.Api.Interfaces;
-using LanGigaCards.Api.Repositories;
-
-namespace LanGigaCards.Api.Repositories
+﻿namespace LanGigaCards.Api.Repositories
 {
     public class UnitOfWork : IUnitOfWork
     {

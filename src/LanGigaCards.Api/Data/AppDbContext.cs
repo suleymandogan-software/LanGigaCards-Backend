@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using LanGigaCards.Api.Entities;
 
 namespace LanGigaCards.Api.Data
 {

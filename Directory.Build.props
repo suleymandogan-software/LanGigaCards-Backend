@@ -13,6 +13,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- IDE0005 (unused using) only runs when the compiler is also producing
+         the XML documentation file; without this it warns that it is disabled,
+         which is itself a warning CI would fail on. CS1591 is silenced with
+         it: the doc file is a means to the analyser here, not a deliverable,
+         and demanding a <summary> on every public member would bury the
+         comments that do exist. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
 </Project>

@@ -1,8 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using LanGigaCards.Api.DTOs;
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
 
 namespace LanGigaCards.Api.Controllers;
 

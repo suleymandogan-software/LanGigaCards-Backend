@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Mail;
 using Microsoft.Extensions.Options;
-using LanGigaCards.Api.Interfaces;
 
 namespace LanGigaCards.Api.Services;
 

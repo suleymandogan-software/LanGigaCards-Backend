@@ -1,6 +1,3 @@
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
-
 namespace LanGigaCards.Api.Services;
 
 public static class AchievementEvaluator

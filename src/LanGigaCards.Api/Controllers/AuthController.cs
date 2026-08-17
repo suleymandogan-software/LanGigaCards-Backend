@@ -11,8 +11,6 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using LanGigaCards.Api.DTOs;
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
 using LanGigaCards.Api.Services;
 
 namespace LanGigaCards.Api.Controllers;

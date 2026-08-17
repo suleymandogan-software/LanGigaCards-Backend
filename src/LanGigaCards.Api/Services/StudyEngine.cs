@@ -1,6 +1,3 @@
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
-
 namespace LanGigaCards.Api.Services;
 
 public sealed record ReviewSchedule(int IntervalDays, double EaseFactor, DateTime NextReviewDate, int MasteryDelta);

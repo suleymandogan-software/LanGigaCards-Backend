@@ -1,6 +1,5 @@
 ﻿using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
-using LanGigaCards.Api.Data;
 
 namespace LanGigaCards.Api.Repositories
 {

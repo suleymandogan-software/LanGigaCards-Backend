@@ -1,5 +1,3 @@
-using LanGigaCards.Api.Interfaces;
-
 namespace LanGigaCards.Api.Services;
 
 /// <summary>

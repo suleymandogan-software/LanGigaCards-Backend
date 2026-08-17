@@ -1,14 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
 
 namespace LanGigaCards.Api.Controllers;
 
 /// <summary>
 /// Desteklenen dillerin listesi.
 ///
-/// <see cref="AllowAnonymous"/>: bu liste kayıt ve onboarding ekranlarında,
+/// <see cref="AllowAnonymousAttribute"/>: bu liste kayıt ve onboarding ekranlarında,
 /// yani kullanıcının henüz bir oturumu yokken gerekiyor. İçinde kişisel bir
 /// bilgi yok, sabit bir katalog.
 /// </summary>

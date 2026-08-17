@@ -2,8 +2,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using LanGigaCards.Api.DTOs;
-using LanGigaCards.Api.Entities;
-using LanGigaCards.Api.Interfaces;
 
 namespace LanGigaCards.Api.Controllers;
 
