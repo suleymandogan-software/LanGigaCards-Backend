@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VocabGrid.DTOs;
@@ -42,7 +42,7 @@ public class DeckController : ControllerBase
         var progress = wordIds.Count == 0
             ? new List<UserWordProgress>()
             : (await _unitOfWork.Repository<UserWordProgress>()
-                    .FindAsync(p => p.UserID == userId.Value && wordIds.Contains(p.WordID)))
+                    .FindAsync(p => p.UserID == userId.Value && p.WordID != null && wordIds.Contains(p.WordID.Value)))
                 .ToList();
 
         var now = DateTime.UtcNow;
@@ -91,7 +91,7 @@ public class DeckController : ControllerBase
         var progress = wordIds.Count == 0
             ? new List<UserWordProgress>()
             : (await _unitOfWork.Repository<UserWordProgress>()
-                    .FindAsync(p => p.UserID == userId.Value && wordIds.Contains(p.WordID)))
+                    .FindAsync(p => p.UserID == userId.Value && p.WordID != null && wordIds.Contains(p.WordID.Value)))
                 .ToList();
 
         var stats = ComputeDeckStats(cards, progress, DateTime.UtcNow);
@@ -229,8 +229,10 @@ public class DeckController : ControllerBase
         DateTime now)
     {
         var wordIds = cards.Select(card => card.WordID).ToHashSet();
-        var progress = allProgress.Where(p => wordIds.Contains(p.WordID)).ToList();
-        var progressByWord = progress.ToDictionary(p => p.WordID);
+        // WordID null olan satırlar müfredat kavramlarına ait; deste
+        // istatistikleri yalnızca kullanıcının kendi kartlarını sayar.
+        var progress = allProgress.Where(p => p.WordID != null && wordIds.Contains(p.WordID.Value)).ToList();
+        var progressByWord = progress.ToDictionary(p => p.WordID!.Value);
 
         var dueCount = cards.Count(card =>
         {

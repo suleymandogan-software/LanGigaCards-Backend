@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -179,34 +179,53 @@ public class ProgressController : ControllerBase
             return BadRequest($"limit must be between 1 and {maximum} for mode '{mode}'.");
         }
 
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
         var categoryIds = await SelectedCategoryIdsAsync(userId.Value);
         if (categoryIds.Count == 0)
         {
             return Ok(Array.Empty<SessionCardDto>());
         }
 
-        var pool = _unitOfWork.Repository<Vocabulary>().Query()
-            .Where(word => word.DeckId == null
-                && word.CategoryId != null
-                && categoryIds.Contains(word.CategoryId.Value));
+        var target = user.TargetLanguageCode;
+        var native = user.NativeLanguageCode;
 
+        // Kart iki çeviriden oluşur: ön yüz hedef dilde, arka yüz ana dilde.
+        // Bir kavram ancak ikisi de varsa çalışılabilir — bir dile içerik
+        // kısmen girildiğinde eksik kavramlar sessizce atlanır, yarım kart
+        // gösterilmez.
+        var translations = _unitOfWork.Repository<ConceptTranslation>().Query();
+
+        var pool = _unitOfWork.Repository<Concept>().Query()
+            .Where(concept => concept.CategoryId != null
+                && categoryIds.Contains(concept.CategoryId.Value)
+                && translations.Any(t => t.ConceptId == concept.Id && t.LanguageCode == target)
+                && translations.Any(t => t.ConceptId == concept.Id && t.LanguageCode == native));
+
+        // İlerleme hedef dile göre: aynı kavramı Almanca ve İspanyolca
+        // öğrenmek iki ayrı iş.
         var progress = _unitOfWork.Repository<UserWordProgress>().Query()
-            .Where(row => row.UserID == userId.Value);
+            .Where(row => row.UserID == userId.Value
+                && row.ConceptId != null
+                && row.LanguageCode == target);
 
         if (mode == "all")
         {
             return Ok(await pool
-                .OrderBy(word => word.Term)
+                .OrderBy(concept => concept.OrderIndex)
                 .Take(limit)
-                .Select(word => new SessionCardDto
+                .Select(concept => new SessionCardDto
                 {
-                    WordId = word.WordID,
-                    CategoryId = word.CategoryId,
-                    Term = word.Term,
-                    Translation = word.Translation,
-                    ExampleSentence = word.ExampleSentence,
-                    ImageUrl = word.ImageUrl,
-                    AudioUrl = word.AudioUrl,
+                    ConceptId = concept.Id,
+                    CategoryId = concept.CategoryId,
+                    Term = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).Term,
+                    Translation = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == native).Term,
+                    ExampleSentence = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).ExampleSentence,
+                    AudioUrl = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).AudioUrl,
                     MasteryLevel = 0,
                     IsNew = false
                 })
@@ -221,18 +240,17 @@ public class ProgressController : ControllerBase
             cards.AddRange(await progress
                 .Where(row => row.NextReviewDate != null
                     && row.NextReviewDate <= now
-                    && pool.Any(word => word.WordID == row.WordID))
+                    && pool.Any(concept => concept.Id == row.ConceptId))
                 .OrderBy(row => row.NextReviewDate)
                 .Take(limit)
                 .Select(row => new SessionCardDto
                 {
-                    WordId = row.Vocabulary!.WordID,
-                    CategoryId = row.Vocabulary.CategoryId,
-                    Term = row.Vocabulary.Term,
-                    Translation = row.Vocabulary.Translation,
-                    ExampleSentence = row.Vocabulary.ExampleSentence,
-                    ImageUrl = row.Vocabulary.ImageUrl,
-                    AudioUrl = row.Vocabulary.AudioUrl,
+                    ConceptId = row.ConceptId!.Value,
+                    CategoryId = row.Concept!.CategoryId,
+                    Term = translations.First(t => t.ConceptId == row.ConceptId && t.LanguageCode == target).Term,
+                    Translation = translations.First(t => t.ConceptId == row.ConceptId && t.LanguageCode == native).Term,
+                    ExampleSentence = translations.First(t => t.ConceptId == row.ConceptId && t.LanguageCode == target).ExampleSentence,
+                    AudioUrl = translations.First(t => t.ConceptId == row.ConceptId && t.LanguageCode == target).AudioUrl,
                     MasteryLevel = row.MasteryLevel,
                     IsNew = false
                 })
@@ -242,18 +260,17 @@ public class ProgressController : ControllerBase
         if (mode is "new" or "mixed" && cards.Count < limit)
         {
             cards.AddRange(await pool
-                .Where(word => !progress.Any(row => row.WordID == word.WordID))
-                .OrderBy(word => word.WordID)
+                .Where(concept => !progress.Any(row => row.ConceptId == concept.Id))
+                .OrderBy(concept => concept.OrderIndex)
                 .Take(limit - cards.Count)
-                .Select(word => new SessionCardDto
+                .Select(concept => new SessionCardDto
                 {
-                    WordId = word.WordID,
-                    CategoryId = word.CategoryId,
-                    Term = word.Term,
-                    Translation = word.Translation,
-                    ExampleSentence = word.ExampleSentence,
-                    ImageUrl = word.ImageUrl,
-                    AudioUrl = word.AudioUrl,
+                    ConceptId = concept.Id,
+                    CategoryId = concept.CategoryId,
+                    Term = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).Term,
+                    Translation = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == native).Term,
+                    ExampleSentence = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).ExampleSentence,
+                    AudioUrl = translations.First(t => t.ConceptId == concept.Id && t.LanguageCode == target).AudioUrl,
                     MasteryLevel = 0,
                     IsNew = true
                 })
@@ -264,7 +281,7 @@ public class ProgressController : ControllerBase
     }
 
     /// <summary>
-    /// Seçili kategorilerde kaç yeni ve kaç zamanı gelmiş kelime olduğu.
+    /// Seçili kategorilerde kaç yeni ve kaç zamanı gelmiş kavram olduğu.
     /// Mod düğmeleri boş bir oturum açmadan önce bunu okuyor.
     /// </summary>
     [HttpGet("session/counts")]
@@ -277,29 +294,43 @@ public class ProgressController : ControllerBase
             return Unauthorized();
         }
 
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
         var categoryIds = await SelectedCategoryIdsAsync(userId.Value);
         if (categoryIds.Count == 0)
         {
             return Ok(new SessionCountsDto());
         }
 
-        var pool = _unitOfWork.Repository<Vocabulary>().Query()
-            .Where(word => word.DeckId == null
-                && word.CategoryId != null
-                && categoryIds.Contains(word.CategoryId.Value));
+        var target = user.TargetLanguageCode;
+        var native = user.NativeLanguageCode;
+
+        var translations = _unitOfWork.Repository<ConceptTranslation>().Query();
+
+        var pool = _unitOfWork.Repository<Concept>().Query()
+            .Where(concept => concept.CategoryId != null
+                && categoryIds.Contains(concept.CategoryId.Value)
+                && translations.Any(t => t.ConceptId == concept.Id && t.LanguageCode == target)
+                && translations.Any(t => t.ConceptId == concept.Id && t.LanguageCode == native));
 
         var progress = _unitOfWork.Repository<UserWordProgress>().Query()
-            .Where(row => row.UserID == userId.Value);
+            .Where(row => row.UserID == userId.Value
+                && row.ConceptId != null
+                && row.LanguageCode == target);
 
         var now = DateTime.UtcNow;
 
         return Ok(new SessionCountsDto
         {
             SelectedCategories = categoryIds.Count,
-            NewAvailable = await pool.CountAsync(word => !progress.Any(row => row.WordID == word.WordID)),
+            NewAvailable = await pool.CountAsync(concept => !progress.Any(row => row.ConceptId == concept.Id)),
             DueCount = await progress.CountAsync(row => row.NextReviewDate != null
                 && row.NextReviewDate <= now
-                && pool.Any(word => word.WordID == row.WordID))
+                && pool.Any(concept => concept.Id == row.ConceptId))
         });
     }
 
@@ -386,6 +417,121 @@ public class ProgressController : ControllerBase
             .ToListAsync();
 
         return Ok(due);
+    }
+
+    /// <summary>
+    /// Kategori oturumundaki bir kavramın değerlendirilmesi.
+    ///
+    /// <c>reviews/{wordId}</c>'dan ayrı, çünkü ilerleme burada kavrama
+    /// <em>ve hedef dile</em> bağlı: aynı kavramı Almanca ve İspanyolca
+    /// öğrenmek iki ayrı iştir. Aralık, kolaylık katsayısı ve ustalık hesabı
+    /// ikisinde de aynı <see cref="StudyEngine"/> kodundan geçer.
+    /// </summary>
+    [HttpPost("concepts/{conceptId:int}/reviews")]
+    public async Task<IActionResult> SubmitConceptReview(int conceptId, [FromBody] SubmitReviewDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var target = user.TargetLanguageCode;
+
+        // Hedef dilde çevirisi olmayan bir kavram bu kullanıcıya hiç
+        // gösterilmedi; değerlendirmesi de kabul edilmemeli.
+        var studiable = await _unitOfWork.Repository<ConceptTranslation>().Query()
+            .AnyAsync(t => t.ConceptId == conceptId && t.LanguageCode == target);
+        if (!studiable)
+        {
+            return NotFound("Concept is not available for review in your target language.");
+        }
+
+        var progressRepository = _unitOfWork.Repository<UserWordProgress>();
+        var progress = await progressRepository.Query()
+            .FirstOrDefaultAsync(row => row.UserID == user.Id
+                && row.ConceptId == conceptId
+                && row.LanguageCode == target);
+
+        var reviewedAt = DateTime.UtcNow;
+        var isNew = progress is null;
+        progress ??= new UserWordProgress
+        {
+            UserID = user.Id,
+            ConceptId = conceptId,
+            LanguageCode = target,
+            LastReviewedAt = reviewedAt
+        };
+
+        var schedule = StudyEngine.CalculateReviewSchedule(
+            progress.IntervalDays, progress.EaseFactor, dto.Rating, reviewedAt);
+
+        progress.IntervalDays = schedule.IntervalDays;
+        progress.EaseFactor = schedule.EaseFactor;
+        progress.NextReviewDate = schedule.NextReviewDate;
+        progress.LastReviewedAt = reviewedAt;
+        progress.LastRating = dto.Rating;
+        progress.ReviewCount++;
+        progress.MasteryLevel = Math.Clamp(progress.MasteryLevel + schedule.MasteryDelta, 0, 5);
+
+        if (isNew)
+        {
+            await progressRepository.AddAsync(progress);
+        }
+        else
+        {
+            progressRepository.Update(progress);
+        }
+
+        var xpEarned = dto.Rating switch
+        {
+            "Easy" => 2,
+            "Medium" => 1,
+            "Hard" => 1,
+            _ => 0
+        };
+
+        // WordId doldurulmuyor: StudyActivity kartlara bağlı, kavramlara
+        // değil. Seri ve günlük özet yalnızca "bugün çalışıldı mı" bilgisine
+        // baktığı için bu kayıt onlar açısından yeterli.
+        var activity = new StudyActivity
+        {
+            UserId = user.Id,
+            OccurredAt = reviewedAt,
+            ActivityType = "Review",
+            Result = dto.Rating,
+            DurationSeconds = dto.DurationSeconds,
+            XpEarned = xpEarned
+        };
+        await _unitOfWork.Repository<StudyActivity>().AddAsync(activity);
+        await DailySummaryEngine.RecordAsync(_unitOfWork, activity);
+
+        StudyEngine.ApplyXp(user, xpEarned);
+        await StudyEngine.UpdateStreakAsync(_unitOfWork, user, reviewedAt);
+        await _unitOfWork.CompleteAsync();
+
+        return Ok(new
+        {
+            ConceptId = conceptId,
+            LanguageCode = target,
+            progress.MasteryLevel,
+            progress.ReviewCount,
+            progress.IntervalDays,
+            progress.EaseFactor,
+            progress.LastRating,
+            progress.NextReviewDate
+        });
     }
 
     [HttpPost("reviews/{wordId:int}")]

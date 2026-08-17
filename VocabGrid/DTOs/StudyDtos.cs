@@ -19,7 +19,13 @@ public sealed class UpdateLessonProgressDto
 /// </summary>
 public sealed class SessionCardDto
 {
-    public int WordId { get; init; }
+    /// <summary>
+    /// Kavramın kimliği — <c>Vocabulary.WordID</c> değil. Kategori oturumu
+    /// paylaşılan müfredattan besleniyor ve orada bir kart dilden bağımsız
+    /// bir kavram artı iki çeviridir; değerlendirme de
+    /// <c>POST /api/Progress/concepts/{conceptId}/reviews</c>'e gider.
+    /// </summary>
+    public int ConceptId { get; init; }
     public int? CategoryId { get; init; }
     public string Term { get; init; } = string.Empty;
     public string Translation { get; init; } = string.Empty;

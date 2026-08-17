@@ -28,6 +28,8 @@ namespace VocabGrid.Data
         public DbSet<StudyActivity> StudyActivities { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<Concept> Concepts { get; set; }
+        public DbSet<ConceptTranslation> ConceptTranslations { get; set; }
         public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; }
         public DbSet<Language> Languages { get; set; }
         public DbSet<Tag> Tags { get; set; }
@@ -99,9 +101,88 @@ namespace VocabGrid.Data
                 .HasForeignKey(uwp => uwp.WordID)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Filtreli benzersizlik: bir satır ya karta ya kavrama ait, ve
+            // her ikisi de kendi içinde tekil olmalı. Filtre olmadan NULL'lar
+            // çakışırdı — SQL Server benzersiz indekste birden fazla NULL'a
+            // izin vermez.
             modelBuilder.Entity<UserWordProgress>()
                 .HasIndex(uwp => new { uwp.UserID, uwp.WordID })
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[WordID] IS NOT NULL");
+
+            modelBuilder.Entity<UserWordProgress>()
+                .HasIndex(uwp => new { uwp.UserID, uwp.ConceptId, uwp.LanguageCode })
+                .IsUnique()
+                .HasFilter("[ConceptId] IS NOT NULL");
+
+            // NoAction, Vocabulary bağıyla aynı nedenle: Users -> Concepts
+            // yolu yok ama kavram silinince ilerlemenin gitmesi doğru.
+            modelBuilder.Entity<UserWordProgress>()
+                .HasOne(uwp => uwp.Concept)
+                .WithMany()
+                .HasForeignKey(uwp => uwp.ConceptId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserWordProgress>().ToTable(t => t.HasCheckConstraint(
+                "CK_UserWordProgress_CardOrConcept",
+                "([WordID] IS NOT NULL AND [ConceptId] IS NULL AND [LanguageCode] IS NULL) OR " +
+                "([WordID] IS NULL AND [ConceptId] IS NOT NULL AND [LanguageCode] IS NOT NULL)"));
+
+            modelBuilder.Entity<Concept>(e =>
+            {
+                e.Property(c => c.Key).HasMaxLength(60);
+                e.HasIndex(c => c.Key).IsUnique();
+                e.Property(c => c.Level).HasMaxLength(20);
+
+                // Kategori bir sınıflandırma etiketi, sahip değil — bkz.
+                // Vocabulary.CategoryId'deki aynı gerekçe.
+                e.HasOne(c => c.Category)
+                    .WithMany()
+                    .HasForeignKey(c => c.CategoryId)
+                    .OnDelete(DeleteBehavior.SetNull);
+
+                // Oturum sorgusu "seçili kategorilerdeki kavramlar, sıraya
+                // göre" diye soruyor.
+                e.HasIndex(c => new { c.CategoryId, c.OrderIndex });
+
+                e.ToTable(t =>
+                {
+                    t.HasCheckConstraint("CK_Concept_Level", "[Level] IN ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')");
+                    t.HasCheckConstraint("CK_Concept_OrderIndex", "[OrderIndex] >= 0");
+                    t.HasCheckConstraint("CK_Concept_KeyNotBlank", "LEN(LTRIM(RTRIM([Key]))) > 0");
+                });
+            });
+
+            modelBuilder.Entity<ConceptTranslation>(e =>
+            {
+                e.HasKey(t => new { t.ConceptId, t.LanguageCode });
+
+                e.HasOne(t => t.Concept)
+                    .WithMany(c => c.Translations)
+                    .HasForeignKey(t => t.ConceptId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // Dil koduna FK: istemcinin ya da bir seed dosyasının
+                // katalogda olmayan bir kod yazması, o kavramı hiçbir zaman
+                // görünmeyen bir satıra çevirirdi.
+                e.HasOne(t => t.Language)
+                    .WithMany()
+                    .HasForeignKey(t => t.LanguageCode)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                e.Property(t => t.LanguageCode).HasMaxLength(10);
+                e.Property(t => t.Term).HasMaxLength(200);
+                e.Property(t => t.ExampleSentence).HasMaxLength(500);
+                e.Property(t => t.AudioUrl).HasMaxLength(500);
+
+                // "Bu dilde çevirisi olan kavramlar": oturum sorgusu bunu iki
+                // kez yapıyor, hedef ve ana dil için.
+                e.HasIndex(t => t.LanguageCode);
+
+                e.ToTable(t => t.HasCheckConstraint(
+                    "CK_ConceptTranslation_TermNotBlank",
+                    "LEN(LTRIM(RTRIM([Term]))) > 0"));
+            });
 
             modelBuilder.Entity<UserProgress>()
                 .HasOne(up => up.User)
@@ -427,6 +508,11 @@ namespace VocabGrid.Data
             // 21-24. dersler: katalogdaki dört kategorinin (Movies, Gaming,
             // Science, Animals) tek bir kelimesi yoktu.
             CurriculumSeedDataInterests.Apply(modelBuilder);
+
+            // Yukarıdaki üç dosyanın içeriğinin dilden bağımsız hâli, artı
+            // İngilizce/Türkçe dışındaki çeviriler. Vocabulary satırları
+            // yerinde duruyor: dersler ve quiz'ler hâlâ onlara bağlı.
+            ConceptSeedData.Apply(modelBuilder);
 
             modelBuilder.Entity<Quiz>().HasData(
                 new Quiz { QuizID = 1, LessonID = 1, QuestionText = "What does 'Merhaba' mean?", QuestionType = "MultipleChoice", Points = 1, TimeLimitSeconds = 20 },

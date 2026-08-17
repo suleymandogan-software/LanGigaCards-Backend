@@ -3,8 +3,19 @@
 namespace VocabGrid.Entities;
 
 /// <summary>
-/// Kullanıcıya özel flashcard / kelime SRS ilerlemesi.
-/// Aynı Vocabulary kartı birden fazla kullanıcıda farklı state tutabilir.
+/// Kullanıcıya özel SRS ilerlemesi. Aynı kart birden fazla kullanıcıda
+/// farklı durum tutabilir.
+///
+/// Bir satır ya öğrencinin kendi destesindeki bir karta
+/// (<see cref="WordID"/>) ya da paylaşılan müfredattaki bir kavrama
+/// (<see cref="ConceptId"/> + <see cref="LanguageCode"/>) aittir; ikisi
+/// birden dolu olamaz, ikisi birden boş da olamaz. Bu kural veritabanında
+/// bir CHECK kısıtıyla da tekrarlanıyor.
+///
+/// İkisini ayrı tablolara bölmek yerine tek tabloda tutmanın nedeni SM-2
+/// hesabının tek olması: aralık, kolaylık katsayısı ve ustalık her iki
+/// durumda da aynı şekilde işliyor, ayrı tablo aynı kodu ikinci kez
+/// yazmayı gerektirirdi.
 /// </summary>
 public class UserWordProgress
 {
@@ -14,8 +25,20 @@ public class UserWordProgress
     public int UserID { get; set; }
     public User User { get; set; } = null!;
 
-    public int WordID { get; set; }
-    public Vocabulary Vocabulary { get; set; } = null!;
+    /// <summary>Öğrencinin kendi destesindeki kart. Müfredat satırlarında null.</summary>
+    public int? WordID { get; set; }
+    public Vocabulary? Vocabulary { get; set; }
+
+    /// <summary>Müfredattaki kavram. Kendi kartlarında null.</summary>
+    public int? ConceptId { get; set; }
+    public Concept? Concept { get; set; }
+
+    /// <summary>
+    /// Kavramın hangi dilde çalışıldığı. İlerlemenin parçası, çünkü aynı
+    /// kavramı Almanca ve İspanyolca öğrenmek iki ayrı iştir — hedef dilini
+    /// değiştiren biri sıfırdan başlamalı, bittiği yerden değil.
+    /// </summary>
+    public string? LanguageCode { get; set; }
 
     public int MasteryLevel { get; set; } = 0;
     public DateTime? NextReviewDate { get; set; }
