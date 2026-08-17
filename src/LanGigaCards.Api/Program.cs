@@ -241,3 +241,11 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+/// <summary>
+/// Top-level statements compile into an internal <c>Program</c> class, which
+/// <c>WebApplicationFactory&lt;Program&gt;</c> cannot reach. Declaring the
+/// partial here makes the real pipeline — routing, auth, rate limits and all —
+/// bootable from the test project instead of being re-assembled by hand.
+/// </summary>
+public partial class Program;
