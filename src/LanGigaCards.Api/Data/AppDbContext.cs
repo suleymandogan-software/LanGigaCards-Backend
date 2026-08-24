@@ -35,6 +35,9 @@ namespace LanGigaCards.Api.Data
         public DbSet<VocabularyTag> VocabularyTags { get; set; }
         public DbSet<DailyStudySummary> DailyStudySummaries { get; set; }
         public DbSet<SupportTicket> SupportTickets { get; set; }
+        public DbSet<DeckTemplate> DeckTemplates { get; set; }
+        public DbSet<DeckTemplateLabel> DeckTemplateLabels { get; set; }
+        public DbSet<DeckTemplateConcept> DeckTemplateConcepts { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -147,7 +150,10 @@ namespace LanGigaCards.Api.Data
 
                 e.ToTable(t =>
                 {
-                    t.HasCheckConstraint("CK_Concept_Level", "[Level] IN ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')");
+                    // B1+ istemcinin kendi seviye seçicisinde var
+                    // (DifficultyMode enum'ı) ve kategori katalogu bu kademeyi
+                    // kullanıyor; müfredat kavramlarında geçmiyor.
+                    t.HasCheckConstraint("CK_Concept_Level", "[Level] IN ('A1', 'A2', 'B1', 'B1+', 'B2', 'C1', 'C2')");
                     t.HasCheckConstraint("CK_Concept_OrderIndex", "[OrderIndex] >= 0");
                     t.HasCheckConstraint("CK_Concept_KeyNotBlank", "LEN(LTRIM(RTRIM([Key]))) > 0");
                 });
@@ -525,6 +531,11 @@ namespace LanGigaCards.Api.Data
             // İngilizce/Türkçe dışındaki çeviriler. Vocabulary satırları
             // yerinde duruyor: dersler ve quiz'ler hâlâ onlara bağlı.
             ConceptSeedData.Apply(modelBuilder);
+
+            // Kategori deste şablonları: kullanıcı bir kategori seçtiğinde
+            // kitaplığına kurulan hazır desteler. Kelimeleri yukarıdaki kavram
+            // havuzunu paylaşır, ayrı bir metin tablosu tutmaz.
+            CategoryCatalogSeedData.Apply(modelBuilder);
 
             modelBuilder.Entity<Quiz>().HasData(
                 new Quiz { QuizID = 1, LessonID = 1, QuestionText = "What does 'Merhaba' mean?", QuestionType = "MultipleChoice", Points = 1, TimeLimitSeconds = 20 },
