@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using LanGigaCards.Api.DTOs;
@@ -20,7 +20,10 @@ public class StatisticsController : ControllerBase
 
     [HttpGet("overview")]
     [ProducesResponseType(typeof(StatisticsOverviewDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<StatisticsOverviewDto>> GetOverview([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<ActionResult<StatisticsOverviewDto>> GetOverview(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? languageCode)
     {
         var userId = TryGetUserId();
         if (userId is null)
@@ -40,7 +43,9 @@ public class StatisticsController : ControllerBase
             return Unauthorized();
         }
 
-        var activities = await GetActivitiesAsync(user.Id, period.Value.Start, period.Value.EndExclusive);
+        var code = await ResolveScopeLanguageAsync(user, languageCode);
+
+        var activities = await GetActivitiesAsync(user.Id, period.Value.Start, period.Value.EndExclusive, code);
         var quizAnswers = activities
             .Where(activity => activity.ActivityType == "Quiz" && activity.Result is "Correct" or "Wrong")
             .ToList();
@@ -55,8 +60,12 @@ public class StatisticsController : ControllerBase
             .Count();
         // The selected period is for the overview metrics only. Streaks must use the
         // user's full activity history, otherwise a short date filter resets them.
+        // Seri de dile bağlı: Almanca serisi Japonca çalışılan günlerle
+        // uzamamalı. Dilsiz satırlar (alan eklenmeden önceki geçmiş) her
+        // kapsama giriyor, yoksa eski aktiviteler bir anda yok sayılırdı.
         var activityHistory = await _unitOfWork.Repository<StudyActivity>()
-            .FindAsync(activity => activity.UserId == user.Id);
+            .FindAsync(activity => activity.UserId == user.Id
+                && (activity.LanguageCode == null || activity.LanguageCode == code));
         var activityDates = activityHistory.Select(activity => activity.OccurredAt);
 
         return Ok(new StatisticsOverviewDto
@@ -85,7 +94,10 @@ public class StatisticsController : ControllerBase
 
     [HttpGet("heatmap")]
     [ProducesResponseType(typeof(IEnumerable<HeatmapPointDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<HeatmapPointDto>>> GetHeatmap([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public async Task<ActionResult<IEnumerable<HeatmapPointDto>>> GetHeatmap(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? languageCode)
     {
         var userId = TryGetUserId();
         if (userId is null)
@@ -99,7 +111,17 @@ public class StatisticsController : ControllerBase
             return BadRequest("from must be earlier than or equal to to.");
         }
 
-        var activities = await GetActivitiesAsync(userId.Value, period.Value.Start, period.Value.EndExclusive);
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var activities = await GetActivitiesAsync(
+            userId.Value,
+            period.Value.Start,
+            period.Value.EndExclusive,
+            await ResolveScopeLanguageAsync(user, languageCode));
         var byDate = activities
             .GroupBy(activity => activity.OccurredAt.Date)
             .ToDictionary(
@@ -129,11 +151,36 @@ public class StatisticsController : ControllerBase
         return Ok(days);
     }
 
-    private async Task<List<StudyActivity>> GetActivitiesAsync(int userId, DateTime start, DateTime endExclusive)
+    /// <summary>
+    /// İstatistiklerin hangi dile ait olduğu. İstemci belirtmezse öğrenenin o
+    /// an çalıştığı dil; ilerleme dil başına tutulduğu için toplam bir sayı
+    /// artık anlamlı değil.
+    /// </summary>
+    private async Task<string> ResolveScopeLanguageAsync(User user, string? requested)
+    {
+        var code = await LanguageCodeResolver.ResolveAsync(_unitOfWork, requested);
+        return code.Length > 0
+            ? code
+            : await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+    }
+
+    /// <summary>
+    /// Dönem içindeki aktiviteler, kapsam diline göre süzülmüş.
+    ///
+    /// Dil alanı boş olan satırlar bu alan eklenmeden önceki geçmiş; her
+    /// kapsama dâhil ediliyorlar. Dışarıda bırakmak, kullanıcının o güne kadar
+    /// biriktirdiği bütün istatistiği bir anda sıfırlardı.
+    /// </summary>
+    private async Task<List<StudyActivity>> GetActivitiesAsync(
+        int userId,
+        DateTime start,
+        DateTime endExclusive,
+        string languageCode)
     {
         return (await _unitOfWork.Repository<StudyActivity>()
-                .FindAsync(activity => activity.UserId == userId &&
-                    activity.OccurredAt >= start && activity.OccurredAt < endExclusive))
+                .FindAsync(activity => activity.UserId == userId
+                    && activity.OccurredAt >= start && activity.OccurredAt < endExclusive
+                    && (activity.LanguageCode == null || activity.LanguageCode == languageCode)))
             .OrderBy(activity => activity.OccurredAt)
             .ToList();
     }

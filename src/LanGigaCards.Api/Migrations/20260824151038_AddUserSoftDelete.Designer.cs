@@ -4,6 +4,7 @@ using LanGigaCards.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LanGigaCards.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824151038_AddUserSoftDelete")]
+    partial class AddUserSoftDelete
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -39096,11 +39099,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<DateOnly>("Day")
                         .HasColumnType("date");
 
-                    b.Property<string>("LanguageCode")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
                     b.Property<int>("LessonCount")
                         .HasColumnType("int");
 
@@ -39124,7 +39122,7 @@ namespace LanGigaCards.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "Day", "LanguageCode")
+                    b.HasIndex("UserId", "Day")
                         .IsUnique();
 
                     b.ToTable("DailyStudySummaries", t =>
@@ -46679,10 +46677,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<int?>("DeckId")
                         .HasColumnType("int");
 
-                    b.Property<string>("LanguageCode")
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
                     b.Property<int?>("LessonId")
                         .HasColumnType("int");
 
@@ -46750,9 +46744,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<int>("TimeSpentSeconds")
                         .HasColumnType("int");
 
-                    b.Property<int?>("WordId")
-                        .HasColumnType("int");
-
                     b.HasKey("Id");
 
                     b.HasIndex("QuizId");
@@ -46760,8 +46751,6 @@ namespace LanGigaCards.Api.Migrations
                     b.HasIndex("QuizSessionId");
 
                     b.HasIndex("SelectedOptionId");
-
-                    b.HasIndex("WordId");
 
                     b.ToTable("QuizSessionAnswers");
                 });
@@ -46819,10 +46808,6 @@ namespace LanGigaCards.Api.Migrations
 
                     b.Property<int>("DurationSeconds")
                         .HasColumnType("int");
-
-                    b.Property<string>("LanguageCode")
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
 
                     b.Property<int?>("LessonId")
                         .HasColumnType("int");
@@ -47159,7 +47144,7 @@ namespace LanGigaCards.Api.Migrations
 
                             t.HasCheckConstraint("CK_Users_Level", "[Level] >= 1");
 
-                            t.HasCheckConstraint("CK_Users_TargetProficiencyLevel", "[TargetProficiencyLevel] IN ('Just Starting', 'Beginner', 'Intermediate', 'Advanced', 'Fluent')");
+                            t.HasCheckConstraint("CK_Users_TargetProficiencyLevel", "[TargetProficiencyLevel] IN ('Just Starting', 'Beginner', 'Intermediate', 'Advanced')");
                         });
                 });
 
@@ -47189,85 +47174,11 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<int>("CategoryId")
                         .HasColumnType("int");
 
-                    b.Property<string>("LanguageCode")
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.HasKey("UserId", "CategoryId", "LanguageCode");
+                    b.HasKey("UserId", "CategoryId");
 
                     b.HasIndex("CategoryId");
 
                     b.ToTable("UserCategories");
-                });
-
-            modelBuilder.Entity("LanGigaCards.Api.Entities.UserLanguageProfile", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("CurrentStreak")
-                        .HasColumnType("int");
-
-                    b.Property<string>("DifficultyMode")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<bool>("IsSetupCompleted")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("LanguageCode")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("LanguageName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime?>("LastStudiedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("LastStudiedDeckId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("LastStudiedWordId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Level")
-                        .HasColumnType("int");
-
-                    b.Property<int>("LongestStreak")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ProficiencyLevel")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<int>("TotalXp")
-                        .HasColumnType("int");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LastStudiedDeckId");
-
-                    b.HasIndex("LastStudiedWordId");
-
-                    b.HasIndex("UserId", "LanguageCode")
-                        .IsUnique();
-
-                    b.ToTable("UserLanguageProfiles");
                 });
 
             modelBuilder.Entity("LanGigaCards.Api.Entities.UserLearningPurpose", b =>
@@ -51849,18 +51760,11 @@ namespace LanGigaCards.Api.Migrations
                         .HasForeignKey("SelectedOptionId")
                         .OnDelete(DeleteBehavior.NoAction);
 
-                    b.HasOne("LanGigaCards.Api.Entities.Vocabulary", "Word")
-                        .WithMany()
-                        .HasForeignKey("WordId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("Quiz");
 
                     b.Navigation("QuizSession");
 
                     b.Navigation("SelectedOption");
-
-                    b.Navigation("Word");
                 });
 
             modelBuilder.Entity("LanGigaCards.Api.Entities.RefreshToken", b =>
@@ -51951,31 +51855,6 @@ namespace LanGigaCards.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Category");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("LanGigaCards.Api.Entities.UserLanguageProfile", b =>
-                {
-                    b.HasOne("LanGigaCards.Api.Entities.Deck", "LastStudiedDeck")
-                        .WithMany()
-                        .HasForeignKey("LastStudiedDeckId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("LanGigaCards.Api.Entities.Vocabulary", "LastStudiedWord")
-                        .WithMany()
-                        .HasForeignKey("LastStudiedWordId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("LanGigaCards.Api.Entities.User", "User")
-                        .WithMany("LanguageProfiles")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("LastStudiedDeck");
-
-                    b.Navigation("LastStudiedWord");
 
                     b.Navigation("User");
                 });
@@ -52153,8 +52032,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Navigation("Decks");
 
                     b.Navigation("EmailVerificationTokens");
-
-                    b.Navigation("LanguageProfiles");
 
                     b.Navigation("PasswordResetTokens");
 

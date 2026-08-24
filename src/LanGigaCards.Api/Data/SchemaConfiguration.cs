@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 namespace LanGigaCards.Api.Data;
 
@@ -187,7 +187,7 @@ internal static class SchemaConfiguration
                 "[TotalXp] >= 0 AND [CurrentStreak] >= 0 AND [LongestStreak] >= 0");
             t.HasCheckConstraint(
                 "CK_Users_TargetProficiencyLevel",
-                "[TargetProficiencyLevel] IN ('Just Starting', 'Beginner', 'Intermediate', 'Advanced')");
+                "[TargetProficiencyLevel] IN ('Just Starting', 'Beginner', 'Intermediate', 'Advanced', 'Fluent')");
         });
 
         modelBuilder.Entity<UserWordProgress>().ToTable(t =>

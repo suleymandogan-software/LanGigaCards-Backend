@@ -1,3 +1,5 @@
+﻿using System.ComponentModel.DataAnnotations;
+
 namespace LanGigaCards.Api.Entities;
 
 /// <summary>
@@ -25,6 +27,14 @@ public class DailyStudySummary
     public User User { get; set; } = null!;
 
     public DateOnly Day { get; set; }
+
+    /// <summary>
+    /// Özetin ait olduğu hedef dil. Bir günün iki dilde ayrı satırı olur;
+    /// benzersizlik de bunu içerir, yoksa iki dilin sayıları tek satırda
+    /// toplanırdı.
+    /// </summary>
+    [MaxLength(10)]
+    public string LanguageCode { get; set; } = string.Empty;
 
     public int ReviewCount { get; set; }
 

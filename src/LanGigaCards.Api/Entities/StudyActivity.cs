@@ -1,3 +1,5 @@
+﻿using System.ComponentModel.DataAnnotations;
+
 namespace LanGigaCards.Api.Entities;
 
 /// <summary>
@@ -22,6 +24,14 @@ public class StudyActivity
 
     public int? DeckId { get; set; }
     public Deck? Deck { get; set; }
+
+    /// <summary>
+    /// Aktivitenin hangi hedef dilde gerçekleştiği. İstatistik ve ısı haritası
+    /// buna göre süzülür, dil profili de bu alandan beslenir. Alan eklenmeden
+    /// önceki satırlarda null.
+    /// </summary>
+    [MaxLength(10)]
+    public string? LanguageCode { get; set; }
 
     /// <summary>Correct, Wrong, Skipped, Again, Hard, Medium, Easy</summary>
     public string? Result { get; set; }

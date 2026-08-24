@@ -56,6 +56,26 @@ public class User
     public bool IsEmailVerified { get; set; }
 
     /// <summary>
+    /// Hesap silindi mi.
+    ///
+    /// Silme isteği satırı kaldırmaz, yalnızca işaretler: desteler, kartlar,
+    /// ilerleme ve çalışma geçmişi veritabanında olduğu gibi kalır. İki nedeni
+    /// var. Birincisi, bu verilerin çoğu tek bir hesaba ait değil — çalışma
+    /// aktiviteleri toplu istatistiklerin, kelime ilerlemesi de müfredat
+    /// ölçümlerinin girdisi; satırın gitmesi geçmişi geriye dönük
+    /// değiştirirdi. İkincisi, yanlışlıkla silinen bir hesabın geri
+    /// getirilebilmesi.
+    ///
+    /// İşaretli hesap her yerde yok sayılır: <see cref="Data.AppDbContext"/>
+    /// üzerindeki genel sorgu süzgeci bu satırları hiçbir sorguya sokmaz, yani
+    /// giriş yapılamaz ve elde kalmış bir erişim anahtarı da işe yaramaz —
+    /// kullanıcıyı kimliğinden okuyan her yol null görür.
+    /// </summary>
+    public bool IsDeleted { get; set; }
+
+    public DateTime? DeletedAt { get; set; }
+
+    /// <summary>
     /// Bu hesabın açık oturumları — cihaz başına bir satır. Eskiden
     /// <c>User</c> üzerinde tek bir token sütunu vardı, bu yüzden ikinci
     /// cihazdan giriş birincinin oturumunu düşürüyordu. Bkz.
@@ -66,6 +86,13 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public UserSettings? Settings { get; set; }
+    /// <summary>
+    /// Öğrenilen her hedef dil için bir satır. Yukarıdaki seri, XP ve seviye
+    /// hesabın tamamına ait toplamlardır; dil bazındaki karşılıkları
+    /// <see cref="UserLanguageProfile"/> içindedir.
+    /// </summary>
+    public ICollection<UserLanguageProfile> LanguageProfiles { get; set; } = new List<UserLanguageProfile>();
+
     public ICollection<UserCategory> UserCategories { get; set; } = new List<UserCategory>();
     public ICollection<UserLearningPurpose> UserLearningPurposes { get; set; } = new List<UserLearningPurpose>();
     public ICollection<UserBadge> UserBadges { get; set; } = new List<UserBadge>();

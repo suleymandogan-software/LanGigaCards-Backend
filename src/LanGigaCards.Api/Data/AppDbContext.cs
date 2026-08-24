@@ -8,6 +8,7 @@ namespace LanGigaCards.Api.Data
 
         public DbSet<User> Users { get; set; }
         public DbSet<UserSettings> UserSettings { get; set; }
+        public DbSet<UserLanguageProfile> UserLanguageProfiles { get; set; }
         public DbSet<Lesson> Lessons { get; set; }
         public DbSet<Quiz> Quizzes { get; set; }
         public DbSet<QuizOption> QuizOptions { get; set; }
@@ -51,19 +52,30 @@ namespace LanGigaCards.Api.Data
             // Dil ve etiket katalogları: ilişkileri ve sabit listeleri.
             CatalogSeedData.Apply(modelBuilder);
 
+            // Silinmiş hesaplar hiçbir sorguda görünmez. Süzgeç burada, tek
+            // yerde duruyor: her denetleyicide "ve silinmemiş olsun" koşulunu
+            // tekrar etmek, bir yerde unutulduğu anda silinmiş bir hesaba giriş
+            // yapılabilmesi demekti.
+            modelBuilder.Entity<User>()
+                .HasQueryFilter(u => !u.IsDeleted);
+
+            // E-posta benzersizliği yalnızca canlı hesaplar arasında. Silinen
+            // satır e-postasıyla birlikte duruyor; süzgeçsiz bir indeks, aynı
+            // adresle yeniden kayıt olmayı sonsuza dek engellerdi.
             modelBuilder.Entity<User>()
                 .HasIndex(u => u.Email)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             modelBuilder.Entity<User>()
                 .HasIndex(u => u.GoogleId)
                 .IsUnique()
-                .HasFilter("[GoogleId] IS NOT NULL");
+                .HasFilter("[GoogleId] IS NOT NULL AND [IsDeleted] = 0");
 
             modelBuilder.Entity<User>()
                 .HasIndex(u => u.AppleId)
                 .IsUnique()
-                .HasFilter("[AppleId] IS NOT NULL");
+                .HasFilter("[AppleId] IS NOT NULL AND [IsDeleted] = 0");
 
             modelBuilder.Entity<UserSettings>()
                 .HasOne(s => s.User)
@@ -206,8 +218,37 @@ namespace LanGigaCards.Api.Data
                 .HasIndex(up => new { up.UserID, up.LessonID })
                 .IsUnique();
 
+            modelBuilder.Entity<UserLanguageProfile>()
+                .HasOne(p => p.User)
+                .WithMany(u => u.LanguageProfiles)
+                .HasForeignKey(p => p.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Deste/kelime silinince profil satırı kalır, işaret ettiği kayıt
+            // null olur: "en son çalışılan" bilgisi kaybolur ama dilin serisi,
+            // XP değeri ve seviyesi silinen bir desteyle birlikte gitmez.
+            modelBuilder.Entity<UserLanguageProfile>()
+                .HasOne(p => p.LastStudiedDeck)
+                .WithMany()
+                .HasForeignKey(p => p.LastStudiedDeckId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<UserLanguageProfile>()
+                .HasOne(p => p.LastStudiedWord)
+                .WithMany()
+                .HasForeignKey(p => p.LastStudiedWordId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Bir kullanıcının bir dilde tek profili olur; ikinci satır
+            // istatistiği ikiye bölerdi.
+            modelBuilder.Entity<UserLanguageProfile>()
+                .HasIndex(p => new { p.UserId, p.LanguageCode })
+                .IsUnique();
+
+            // Dil, bileşik anahtarın parçası: aynı kategori iki farklı dilde
+            // ayrı ayrı seçilebilmeli.
             modelBuilder.Entity<UserCategory>()
-                .HasKey(uc => new { uc.UserId, uc.CategoryId });
+                .HasKey(uc => new { uc.UserId, uc.CategoryId, uc.LanguageCode });
 
             modelBuilder.Entity<UserCategory>()
                 .HasOne(uc => uc.User)
@@ -320,6 +361,12 @@ namespace LanGigaCards.Api.Data
                 .HasOne(a => a.Quiz)
                 .WithMany()
                 .HasForeignKey(a => a.QuizId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<QuizSessionAnswer>()
+                .HasOne(a => a.Word)
+                .WithMany()
+                .HasForeignKey(a => a.WordId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<QuizSessionAnswer>()

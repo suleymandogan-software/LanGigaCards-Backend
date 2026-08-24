@@ -4,6 +4,7 @@ using LanGigaCards.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LanGigaCards.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824152029_AddPerLanguageLearningProfiles")]
+    partial class AddPerLanguageLearningProfiles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -46679,10 +46682,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<int?>("DeckId")
                         .HasColumnType("int");
 
-                    b.Property<string>("LanguageCode")
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
                     b.Property<int?>("LessonId")
                         .HasColumnType("int");
 
@@ -46750,9 +46749,6 @@ namespace LanGigaCards.Api.Migrations
                     b.Property<int>("TimeSpentSeconds")
                         .HasColumnType("int");
 
-                    b.Property<int?>("WordId")
-                        .HasColumnType("int");
-
                     b.HasKey("Id");
 
                     b.HasIndex("QuizId");
@@ -46760,8 +46756,6 @@ namespace LanGigaCards.Api.Migrations
                     b.HasIndex("QuizSessionId");
 
                     b.HasIndex("SelectedOptionId");
-
-                    b.HasIndex("WordId");
 
                     b.ToTable("QuizSessionAnswers");
                 });
@@ -51849,18 +51843,11 @@ namespace LanGigaCards.Api.Migrations
                         .HasForeignKey("SelectedOptionId")
                         .OnDelete(DeleteBehavior.NoAction);
 
-                    b.HasOne("LanGigaCards.Api.Entities.Vocabulary", "Word")
-                        .WithMany()
-                        .HasForeignKey("WordId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("Quiz");
 
                     b.Navigation("QuizSession");
 
                     b.Navigation("SelectedOption");
-
-                    b.Navigation("Word");
                 });
 
             modelBuilder.Entity("LanGigaCards.Api.Entities.RefreshToken", b =>

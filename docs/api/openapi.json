@@ -1430,6 +1430,66 @@
         }
       }
     },
+    "/api/Quiz/card-sessions": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCardQuizDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCardQuizDto"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCardQuizDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/Quiz/card-completion": {
+      "get": {
+        "tags": [
+          "Quiz"
+        ],
+        "parameters": [
+          {
+            "name": "deckId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "languageCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/Statistics/overview": {
       "get": {
         "tags": [
@@ -1450,6 +1510,13 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "languageCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1497,6 +1564,13 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "languageCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1737,6 +1811,18 @@
         }
       }
     },
+    "/api/User": {
+      "delete": {
+        "tags": [
+          "User"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/User/categories": {
       "get": {
         "tags": [
@@ -1922,6 +2008,189 @@
           }
         }
       }
+    },
+    "/api/User/languages": {
+      "get": {
+        "tags": [
+          "UserLanguages"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageProfileDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageProfileDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageProfileDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/User/languages/{languageCode}": {
+      "get": {
+        "tags": [
+          "UserLanguages"
+        ],
+        "parameters": [
+          {
+            "name": "languageCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/User/languages/switch": {
+      "put": {
+        "tags": [
+          "UserLanguages"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchTargetLanguageDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchTargetLanguageDto"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchTargetLanguageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/User/languages/{languageCode}/setup": {
+      "put": {
+        "tags": [
+          "UserLanguages"
+        ],
+        "parameters": [
+          {
+            "name": "languageCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteLanguageSetupDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteLanguageSetupDto"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteLanguageSetupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageProfileDto"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2023,6 +2292,30 @@
         },
         "additionalProperties": false
       },
+      "CardQuizAnswerDto": {
+        "type": "object",
+        "properties": {
+          "wordId": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          },
+          "isCorrect": {
+            "type": "boolean"
+          },
+          "skipped": {
+            "type": "boolean"
+          },
+          "timeSpentSeconds": {
+            "maximum": 3600,
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
       "CategoryDto": {
         "type": "object",
         "properties": {
@@ -2063,6 +2356,33 @@
           "newPassword": {
             "minLength": 8,
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompleteLanguageSetupDto": {
+        "required": [
+          "proficiencyLevel"
+        ],
+        "type": "object",
+        "properties": {
+          "proficiencyLevel": {
+            "minLength": 1,
+            "pattern": "^(Just Starting|Beginner|Intermediate|Advanced|Fluent)$",
+            "type": "string"
+          },
+          "difficultyMode": {
+            "pattern": "^$|^(A1|A2|B1|B1\\+|B2|C1|C2)$",
+            "type": "string",
+            "nullable": true
+          },
+          "categoryIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -2192,6 +2512,10 @@
             "type": "string",
             "nullable": true
           },
+          "nativeTitle": {
+            "type": "string",
+            "nullable": true
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -2282,6 +2606,74 @@
           "xpEarned": {
             "type": "integer",
             "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LanguageProfileDto": {
+        "type": "object",
+        "properties": {
+          "languageCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "languageName": {
+            "type": "string",
+            "nullable": true
+          },
+          "proficiencyLevel": {
+            "type": "string",
+            "nullable": true
+          },
+          "difficultyMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isSetupCompleted": {
+            "type": "boolean"
+          },
+          "categoryIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "nullable": true
+          },
+          "currentStreak": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "longestStreak": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalXp": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "level": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastStudiedDeckId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "lastStudiedWordId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "lastStudiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "additionalProperties": false
@@ -2597,6 +2989,32 @@
         },
         "additionalProperties": false
       },
+      "SubmitCardQuizDto": {
+        "type": "object",
+        "properties": {
+          "deckId": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "languageCode": {
+            "maxLength": 10,
+            "type": "string",
+            "nullable": true
+          },
+          "answers": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CardQuizAnswerDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "SubmitQuizAnswerDto": {
         "type": "object",
         "properties": {
@@ -2643,6 +3061,25 @@
             "format": "int32"
           },
           "difficultyMode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SwitchTargetLanguageDto": {
+        "required": [
+          "languageCode"
+        ],
+        "type": "object",
+        "properties": {
+          "languageCode": {
+            "maxLength": 10,
+            "minLength": 1,
+            "type": "string"
+          },
+          "languageName": {
+            "maxLength": 100,
             "type": "string",
             "nullable": true
           }
@@ -2790,7 +3227,7 @@
             "nullable": true
           },
           "targetProficiencyLevel": {
-            "pattern": "^$|^(Just Starting|Beginner|Intermediate|Advanced)$",
+            "pattern": "^$|^(Just Starting|Beginner|Intermediate|Advanced|Fluent)$",
             "type": "string",
             "nullable": true
           },

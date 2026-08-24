@@ -5,7 +5,7 @@ namespace LanGigaCards.Api.Services;
 /// <summary>
 /// Kullanıcının kategori seçimini kitaplığındaki kategori desteleriyle eşitler:
 /// seçilen her kategori için şablondan bir deste kurar, seçimden çıkan
-/// kategorinin destesini —<em>dokunulmamışsa</em>— kaldırır.
+/// kategorinin destesini kaldırır.
 ///
 /// <para>
 /// Hedef dil değişimi de aynı yoldan geçer. İstenen anahtar kümesi
@@ -16,10 +16,11 @@ namespace LanGigaCards.Api.Services;
 /// </para>
 ///
 /// <para>
-/// "Dokunulmamış" tanımı bilinçli olarak dar: destede tek bir tekrar kaydı
-/// varsa ya da öğrenen desteyi yeniden adlandırmışsa deste kalır. Emeğin
-/// üzerine yazmaktansa kitaplıkta fazladan bir deste bırakmak yeğdir — silinen
-/// ilerleme geri gelmez.
+/// Kaldırma koşulsuzdur ve bedeli açıktır: seçimden çıkan kategorinin
+/// destesindeki ilerleme kartlarla birlikte gider. Kategoriyi seçimden çıkarmak
+/// "bu desteyi istemiyorum" demektir ve öyle davranıyor. Kullanıcının kendi
+/// kurduğu desteler bundan hiç etkilenmez — burası yalnızca uygulamanın
+/// ürettiği <c>category_</c> önekli destelere bakar.
 /// </para>
 /// </summary>
 internal static class CategoryDeckSynchronizer
@@ -78,6 +79,7 @@ internal static class CategoryDeckSynchronizer
             "beginner" => RankOf("A2"),
             "intermediate" => RankOf("B2"),
             "advanced" => RankOf("C2"),
+            "fluent" => RankOf("C2"),
             _ => RankOf("B1"),
         };
     }
@@ -111,13 +113,26 @@ internal static class CategoryDeckSynchronizer
             return SyncReport.Empty;
         }
 
+        // Seviye önce o dilin kendi profilinden okunuyor: aynı kişi Almancada
+        // B2, yeni başladığı Japoncada A1 olabilir ve deste o dilin seviyesine
+        // göre kurulmalı. Profil yoksa (dil ilk kez seçiliyor, satır henüz
+        // açılmadı) eski davranışa — hesap geneli ayar artı profil yeterliliği
+        // — düşülür.
+        var languageProfile = (await unitOfWork.Repository<UserLanguageProfile>()
+            .FindAsync(p => p.UserId == userId && p.LanguageCode == targetCode)).FirstOrDefault();
         var settings = (await unitOfWork.Repository<UserSettings>()
             .FindAsync(s => s.UserId == userId)).FirstOrDefault();
-        var levelCeiling = CeilingFor(settings?.DifficultyMode, user.TargetProficiencyLevel);
+        var levelCeiling = languageProfile is null
+            ? CeilingFor(settings?.DifficultyMode, user.TargetProficiencyLevel)
+            : CeilingFor(languageProfile.DifficultyMode, languageProfile.ProficiencyLevel);
 
+        // Kategori seçimi de dile bağlı. Dilsiz satırlar (alan eklenmeden önce
+        // yapılmış seçimler) her dilde geçerli sayılır.
         var selectedCategoryIds = await unitOfWork.Repository<UserCategory>().Query()
-            .Where(link => link.UserId == userId)
+            .Where(link => link.UserId == userId
+                           && (link.LanguageCode == targetCode || link.LanguageCode == ""))
             .Select(link => link.CategoryId)
+            .Distinct()
             .ToListAsync();
 
         var templates = await unitOfWork.Repository<DeckTemplate>().Query()
@@ -135,16 +150,34 @@ internal static class CategoryDeckSynchronizer
             .Where(t => selectedCategoryIds.Contains(t.CategoryId))
             .ToDictionary(t => StarterKeyFor(t.Slug, targetCode));
 
+        // Yalnızca bu dilin kategori desteleri. Dil ayrımından önce burası tüm
+        // kategori destelerini topluyordu ve aşağıdaki temizlik adımı başka
+        // dilin destelerini "artık istenmiyor" sayıp siliyordu: Almancadan
+        // Japoncaya geçen biri Almanca kitaplığını kaybediyordu. Artık her dil
+        // kendi kitaplığını koruyor, geri dönüldüğünde yerinde duruyor.
+        var languageSuffix = "_" + targetCode;
         var existing = await unitOfWork.Repository<Deck>().Query()
             .Where(d => d.UserId == userId
                         && d.StarterKey != null
-                        && d.StarterKey.StartsWith(StarterKeyPrefix))
+                        && d.StarterKey.StartsWith(StarterKeyPrefix)
+                        && d.StarterKey.EndsWith(languageSuffix))
             .ToListAsync();
 
         var createdDecks = new List<Deck>();
         var removed = new List<int>();
         var toppedUpDecks = 0;
 
+        // Seçimden çıkan kategorinin destesi kaldırılır — koşulsuz.
+        //
+        // Burada eskiden "dokunulmamışsa" koşulu vardı: üzerinde tekrar kaydı
+        // olan ya da yeniden adlandırılmış deste bırakılıyordu. Niyet iyiydi
+        // ama sonucu kitaplığın seçimle örtüşmemesiydi: yalnızca "Teknoloji"
+        // seçen biri, aylar önce bir kez açtığı "Yemek" destesini kitaplıkta
+        // görmeye devam ediyordu ve onu oradan çıkarmanın bir yolu yoktu.
+        //
+        // Bedeli açık: o destedeki ilerleme kartlarla birlikte siliniyor ve
+        // kategori yeniden seçilirse deste şablondan sıfırdan kurulur.
+        // Kullanıcının kendi kurduğu desteler bu döngüye hiç girmiyor.
         foreach (var deck in existing)
         {
             if (wanted.ContainsKey(deck.StarterKey!))
@@ -152,11 +185,8 @@ internal static class CategoryDeckSynchronizer
                 continue;
             }
 
-            if (await IsUntouchedAsync(unitOfWork, deck, templates))
-            {
-                await RemoveDeckAsync(unitOfWork, deck);
-                removed.Add(deck.Id);
-            }
+            await RemoveDeckAsync(unitOfWork, deck);
+            removed.Add(deck.Id);
         }
 
         var alreadyPresent = existing
@@ -273,7 +303,15 @@ internal static class CategoryDeckSynchronizer
             var slug = body[..cut];
             if (!slugs.Contains(slug))
             {
-                // Katalogda yok: istemcinin kendi destesi, dokunmuyoruz.
+                // Katalogda karşılığı olmayan slug'lar (basics, everyday,
+                // numbers, colours, time) uygulamanın eskiden herkese kurduğu
+                // genel destelerdi: hiçbir çalışma konusuna bağlı değiller.
+                //
+                // Kitaplık artık yalnızca seçilen konulardan oluşuyor, yani
+                // bunların yeri yok — ve istemci de artık kurmuyor. Burada
+                // temizleniyorlar; aksi hâlde eski hesaplarda kalıcı olarak
+                // durur ve "sadece seçtiğim konular" sözünü bozarlardı.
+                await RemoveDeckAsync(unitOfWork, deck);
                 continue;
             }
 
@@ -288,6 +326,9 @@ internal static class CategoryDeckSynchronizer
             if (!ownByKey.TryGetValue(catalogKey, out var keeper))
             {
                 deck.StarterKey = catalogKey;
+                // Anahtardan çıkan dil, destenin gerçekten öğrettiği dil —
+                // kullanıcının şimdikinden farklı olabilir ve öyle kalmalı.
+                deck.LanguageCode = iso;
                 unitOfWork.Repository<Deck>().Update(deck);
                 ownByKey[catalogKey] = deck;
                 continue;
@@ -465,42 +506,6 @@ internal static class CategoryDeckSynchronizer
         concept.Translations.FirstOrDefault(t =>
             string.Equals(t.LanguageCode, languageCode, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>
-    /// Deste hâlâ şablondan geldiği gibi mi duruyor?
-    ///
-    /// İki koşul birden aranır: hiçbir kartında tekrar kaydı olmayacak ve
-    /// başlığı şablonun bildiği adlardan biri olacak. Başlık kontrolü tüm
-    /// diller üzerinden yapılır, çünkü öğrenen hedef dilini değiştirdiğinde
-    /// desteyi eski dildeki adıyla bırakmış olabilir — o hâlâ "dokunulmamış"
-    /// sayılır, öğrenenin yazdığı bir ad değildir.
-    /// </summary>
-    private static async Task<bool> IsUntouchedAsync(
-        IUnitOfWork unitOfWork,
-        Deck deck,
-        IReadOnlyList<DeckTemplate> templates)
-    {
-        var hasProgress = await unitOfWork.Repository<UserWordProgress>().Query()
-            .AnyAsync(progress => progress.WordID != null && progress.Vocabulary!.DeckId == deck.Id);
-        if (hasProgress)
-        {
-            return false;
-        }
-
-        var slug = SlugFrom(deck.StarterKey);
-        var template = templates.FirstOrDefault(t =>
-            string.Equals(t.Slug, slug, StringComparison.OrdinalIgnoreCase));
-
-        // Kataloğun artık tanımadığı bir şablon: adını doğrulayamayız, o yüzden
-        // dokunulmuş sayıp bırakırız.
-        if (template is null)
-        {
-            return false;
-        }
-
-        return template.Labels.Any(label =>
-            string.Equals(label.Title, deck.Title, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static async Task RemoveDeckAsync(IUnitOfWork unitOfWork, Deck deck)
     {
         // Vocabulary -> Deck ilişkisi ClientCascade: EF yalnızca değişiklik
@@ -530,10 +535,11 @@ internal static class CategoryDeckSynchronizer
         string nativeCode,
         int levelCeiling)
     {
-        // Ana dil, hedef dil değil: deste listesi bir gezinme yüzeyi ve öğrenen
-        // aradığını bulabilmek için onu akıcı okuyabilmeli. Öğrenilen dille
-        // temas kartların kendisinde (Term hedef dilde, Translation ana dilde).
-        var label = LabelFor(template, nativeCode);
+        // Deste adı hedef dilde: adı okumak öğrenilen dille ilk temastır ve onu
+        // çevirmek o teması yok ederdi. Yeni başlayan biri "Wissenschaft"ın ne
+        // olduğunu bilmiyor diye ana dildeki karşılığı da veriliyor, ama ayrı
+        // bir alanda — bkz. DeckController.NativeTitleFor.
+        var label = LabelFor(template, targetCode);
         var now = DateTime.UtcNow;
 
         var cards = CardsFor(template, targetCode, nativeCode, levelCeiling, now).ToList();
@@ -566,8 +572,7 @@ internal static class CategoryDeckSynchronizer
     /// <summary>
     /// Bir şablonun verilen dildeki adı/açıklaması; o dilde metin yoksa
     /// İngilizceye düşer, böylece dil listesine yeni bir dil eklemek, metni
-    /// yazılana kadar adsız deste üretmez. Öğrenenin <em>ana</em> diliyle
-    /// çağrılır (bkz. <see cref="BuildDeckAsync"/>), hedef diliyle değil.
+    /// yazılana kadar adsız deste üretmez.
     /// </summary>
     private static DeckTemplateLabel LabelFor(DeckTemplate template, string languageCode) =>
         template.Labels.FirstOrDefault(l => string.Equals(l.LanguageCode, languageCode, StringComparison.OrdinalIgnoreCase))
@@ -577,7 +582,7 @@ internal static class CategoryDeckSynchronizer
     /// <c>category_music_de</c> -> <c>music</c>. Dil kodu son alt çizgiden sonra
     /// durur; slug'ın kendisi alt çizgi içerebileceği için sondan aranır.
     /// </summary>
-    private static string SlugFrom(string? starterKey)
+    internal static string SlugFrom(string? starterKey)
     {
         if (string.IsNullOrEmpty(starterKey) || !starterKey.StartsWith(StarterKeyPrefix, StringComparison.Ordinal))
         {

@@ -87,13 +87,49 @@ public class UserController : ControllerBase
         user.DailyGoalMinutes = dto.DailyGoalMinutes > 0 ? dto.DailyGoalMinutes : user.DailyGoalMinutes;
 
         userRepository.Update(user);
+
+        // Hedef dilin profil satırı her koşulda var olmalı: istatistik, seri ve
+        // "en son çalışılan" bilgisi oraya yazılıyor. Yeni bir dile geçildiğinde
+        // satır burada açılır ve kurulumu tamamlanmamış olarak işaretlenir —
+        // istemci seviye ölçümü ve kategori penceresini bu bayrağa bakarak açar.
+        var languageChanged = !string.Equals(previousTargetCode, user.TargetLanguageCode, StringComparison.OrdinalIgnoreCase);
+
+        // Hedef dil ana dille aynıysa profil açılmıyor: öğrenilen bir dil değil.
+        // Onboarding sırasında ikisi bir an için eşit kalabiliyor ve o anda
+        // açılan satır, kullanıcının hiç çalışmadığı bir dili "öğrendiklerim"
+        // listesine sokardı. Aynı kural switch ucunda da var.
+        var nativeCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
+        var targetCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+        var languageProfile = targetCode.Length == 0 || targetCode == nativeCode
+            ? null
+            : await LanguageProgressEngine.GetOrCreateAsync(
+                _unitOfWork,
+                userId.Value,
+                user.TargetLanguageCode,
+                user.TargetLanguage,
+                user.TargetProficiencyLevel);
+
+        // Seviye bu ekrandan değiştirildiyse dil profiline de işlenir; ikisi
+        // ayrışırsa kelime seçimi bir değeri, ekran başka birini gösterir.
+        if (languageProfile is not null && !languageChanged &&
+            !string.IsNullOrWhiteSpace(dto.TargetProficiencyLevel) &&
+            !string.Equals(languageProfile.ProficiencyLevel, user.TargetProficiencyLevel, StringComparison.OrdinalIgnoreCase))
+        {
+            languageProfile.ProficiencyLevel = user.TargetProficiencyLevel;
+            languageProfile.DifficultyMode = LanguageProgressEngine.DifficultyModeFor(user.TargetProficiencyLevel);
+            if (languageProfile.Id != 0)
+            {
+                _unitOfWork.Repository<UserLanguageProfile>().Update(languageProfile);
+            }
+        }
+
         await _unitOfWork.CompleteAsync();
 
-        // Hedef dil değiştiyse kategori desteleri de o dile geçmeli: eskiler
-        // artık istenmeyen anahtarı taşır ve dokunulmamışlarsa yerlerini yeni
-        // dildeki karşılıklarına bırakır. Dil aynı kaldıysa hiç uğraşmıyoruz —
-        // senkronizasyon her çağrıda tüm şablonları okuyor.
-        if (!string.Equals(previousTargetCode, user.TargetLanguageCode, StringComparison.OrdinalIgnoreCase))
+        // Kitaplık yalnızca kurulumu tamamlanmış diller için eşitlenir. Yeni bir
+        // dilde seviye ve ilgi alanları henüz sorulmadı; deste kurmak için
+        // kurulum penceresinin sonucunu bekliyoruz
+        // (PUT /api/User/languages/{code}/setup).
+        if (languageChanged && languageProfile?.IsSetupCompleted == true)
         {
             await CategoryDeckSynchronizer.SyncAsync(_unitOfWork, userId.Value);
         }
@@ -206,6 +242,70 @@ public class UserController : ControllerBase
         return Ok(new { Message = "Password changed successfully." });
     }
 
+    /// <summary>
+    /// Hesabı siler.
+    ///
+    /// <para>
+    /// Silme işaretlemedir: <c>Users</c> satırı ve ona bağlı her şey —
+    /// desteler, kartlar, kelime ilerlemesi, çalışma geçmişi — veritabanında
+    /// olduğu gibi kalır, satır yalnızca <see cref="User.IsDeleted"/> ile
+    /// işaretlenir. Gerekçe o alanın üzerinde yazılı.
+    /// </para>
+    ///
+    /// <para>
+    /// İşaretlenen hesap bundan sonra hiçbir sorguda görünmez: giriş
+    /// yapılamaz, elde kalmış erişim anahtarı da işe yaramaz. Yenileme
+    /// anahtarları ayrıca iptal ediliyor — süzgeç zaten yeterli, ama
+    /// kullanılamaz bir kimlik bilgisini satırda tutmanın bir nedeni yok.
+    /// </para>
+    ///
+    /// <para>
+    /// Aynı e-postayla yeniden kayıt olmak mümkün: benzersizlik indeksi
+    /// yalnızca silinmemiş hesapları kapsıyor. Yeni kayıt yeni bir hesaptır;
+    /// eskisinin ilerlemesini devralmaz.
+    /// </para>
+    /// </summary>
+    [HttpDelete]
+    public async Task<IActionResult> DeleteMyAccount()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            // Süzgeç yüzünden zaten silinmiş bir hesap da buraya düşer; iki
+            // durumu ayırmıyoruz — çağıran için sonuç aynı.
+            return NotFound("User not found.");
+        }
+
+        user.IsDeleted = true;
+        user.DeletedAt = DateTime.UtcNow;
+        userRepository.Update(user);
+
+        // Token'lar bizde kendi tablosunda; "sütunu temizle" yerine kullanıcının
+        // açık oturumlarını tek tek iptal etmek gerekiyor (AuthController
+        // .ResetPassword ve yukarıdaki ChangePassword ile aynı kalıp).
+        var now = DateTime.UtcNow;
+        var refreshTokenRepository = _unitOfWork.Repository<RefreshToken>();
+        var activeTokens = await refreshTokenRepository.Query()
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        foreach (var active in activeTokens)
+        {
+            active.RevokedAt = now;
+            refreshTokenRepository.Update(active);
+        }
+
+        await _unitOfWork.CompleteAsync();
+
+        return NoContent();
+    }
+
     [HttpGet("categories")]
     [ProducesResponseType(typeof(IEnumerable<CategoryDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<CategoryDto>>> GetMyCategories()
@@ -216,8 +316,14 @@ public class UserController : ControllerBase
             return Unauthorized();
         }
 
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        var languageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user?.TargetLanguageCode);
+
+        // Dilsiz satırlar bu alan eklenmeden önce yapılmış seçimler; her dilde
+        // geçerli sayılıyorlar.
         var links = await _unitOfWork.Repository<UserCategory>()
-            .FindAsync(link => link.UserId == userId.Value);
+            .FindAsync(link => link.UserId == userId.Value
+                && (link.LanguageCode == languageCode || link.LanguageCode == ""));
         var categoryIds = links.Select(link => link.CategoryId).ToHashSet();
         var categories = categoryIds.Count == 0
             ? new List<Category>()
@@ -255,8 +361,15 @@ public class UserController : ControllerBase
             }
         }
 
+        // Seçim hedef dile ait: Almanca çalışırken yemek konusunu isteyen biri
+        // Japoncada istemeyebilir. Bu yüzden yalnızca o dilin satırları
+        // değiştiriliyor; başka dillerinki yerinde kalıyor.
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        var languageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user?.TargetLanguageCode);
+
         var linkRepository = _unitOfWork.Repository<UserCategory>();
-        var current = await linkRepository.FindAsync(link => link.UserId == userId.Value);
+        var current = await linkRepository.FindAsync(link => link.UserId == userId.Value
+            && (link.LanguageCode == languageCode || link.LanguageCode == ""));
         foreach (var link in current)
         {
             linkRepository.Delete(link);
@@ -267,7 +380,8 @@ public class UserController : ControllerBase
             await linkRepository.AddAsync(new UserCategory
             {
                 UserId = userId.Value,
-                CategoryId = categoryId
+                CategoryId = categoryId,
+                LanguageCode = languageCode
             });
         }
 

@@ -21,6 +21,20 @@ public class ProgressController : ControllerBase
     /// </summary>
     private const int MaxBrowseLimit = 500;
 
+    /// <summary>
+    /// Paylaşılan müfredatın (Lessons + deste-siz Vocabulary satırları) hangi
+    /// dil çifti için yazıldığı. <c>Vocabulary.Term</c> hedef dildeki kelime,
+    /// <c>Translation</c> öğrenenin ana dilindeki karşılığı; seed içeriği
+    /// ("Hello"/"Merhaba") bunu ana dili Türkçe, hedefi İngilizce olan bir
+    /// öğrenene göre yazıyor.
+    ///
+    /// Şemada bu bilgiyi tutacak bir sütun yok — kavram modeline (Concept +
+    /// ConceptTranslation) taşınan içerikte var, ama dersler ve quiz'ler hâlâ
+    /// eski satırlara bağlı. Sabitler bu yüzden burada ve tek yerde.
+    /// </summary>
+    private const string CurriculumTermLanguage = "en";
+    private const string CurriculumTranslationLanguage = "tr";
+
     private readonly IUnitOfWork _unitOfWork;
 
     public ProgressController(IUnitOfWork unitOfWork)
@@ -116,12 +130,16 @@ public class ProgressController : ControllerBase
             LessonId = lessonId,
             OccurredAt = occurredAt,
             ActivityType = "Lesson",
+            // Dersler paylaşılan müfredattan geliyor ve destesi yok; aktivite o
+            // an çalışılan dile yazılıyor.
+            LanguageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode),
             Result = dto.Completed ? "Completed" : null,
             DurationSeconds = dto.StudyDurationSeconds,
             XpEarned = dto.Completed ? 5 : 0
         };
         await _unitOfWork.Repository<StudyActivity>().AddAsync(activity);
         await DailySummaryEngine.RecordAsync(_unitOfWork, activity);
+        await LanguageProgressEngine.RecordAsync(_unitOfWork, activity, user.TargetLanguage);
 
         StudyEngine.ApplyXp(user, activity.XpEarned);
         await StudyEngine.UpdateStreakAsync(_unitOfWork, user, occurredAt);
@@ -367,17 +385,52 @@ public class ProgressController : ControllerBase
         // Deste-siz bir kart yalnızca paylaşılan müfredata aitse
         // çalışılabilir; sahipsiz deste-siz kayıtlar tekrar kuyruğuna
         // girmez. Bu kural aşağıdaki LessonVocabularies alt sorgusunda.
-        var includeCurriculum = deckId is null;
+        //
+        // Müfredat (Lessons/LessonVocabularies) hiçbir dil alanı taşımıyor:
+        // Vocabulary'de bir satır Term ve Translation olmak üzere iki metin
+        // tutuyor ve hangi dillerde olduklarını hiçbir yerde yazmıyor. Seed
+        // içeriği ("Hello"/"Merhaba", CurriculumSeedData) bunu örtük olarak tek
+        // bir çift için yazılmış kılıyor: ön yüz İngilizce, arka yüz Türkçe.
+        //
+        // "deckId yoksa herkese ekle" demek, örneğin Almanca çalışan birinin
+        // tekrar kuyruğuna kendi destelerinden hiçbiriyle ilgisi olmayan
+        // İngilizce/Türkçe kartlar karıştırmak demekti. Yalnızca müfredatın
+        // gerçekten hizmet ettiği çifte açılıyor.
+        //
+        // Çift sabit olarak burada duruyor çünkü şemada tutulacağı bir yer yok;
+        // müfredat dil sütunları kazandığında (kavram modelinde olduğu gibi,
+        // bkz. Concept/ConceptTranslation) bu kontrol o sütunlara bakmalı.
+        var includeCurriculum = false;
+        var currentLanguage = string.Empty;
+        if (deckId is null)
+        {
+            var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+            if (user is null)
+            {
+                return Unauthorized();
+            }
+
+            currentLanguage = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+            var native = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
+            includeCurriculum = currentLanguage == CurriculumTermLanguage && native == CurriculumTranslationLanguage;
+        }
+
         var now = DateTime.UtcNow;
 
         var lessonLinks = _unitOfWork.Repository<LessonVocabulary>().Query();
         var progress = _unitOfWork.Repository<UserWordProgress>().Query()
             .Where(row => row.UserID == userId.Value);
 
+        // Deste verilmediğinde ("tüm desteler") havuz da öğrenenin o anki hedef
+        // diliyle sınırlı: başka bir dile geçmiş biri, karma tekrar kuyruğunda
+        // eski dilin kartlarını görmemeli. Dili damgalanmamış desteler (alan
+        // eklenmeden önce kurulanlar) her dilde geçerli sayılıyor — kitaplık
+        // listesindeki kuralın aynısı.
         var pool = _unitOfWork.Repository<Vocabulary>().Query()
             .Where(word => deckId != null
                 ? word.DeckId == deckId
-                : (word.DeckId != null && word.Deck!.UserId == userId.Value)
+                : (word.DeckId != null && word.Deck!.UserId == userId.Value
+                    && (word.Deck!.LanguageCode == null || word.Deck!.LanguageCode == currentLanguage))
                   || (includeCurriculum && word.DeckId == null
                       && lessonLinks.Any(link => link.WordID == word.WordID)));
 
@@ -521,12 +574,15 @@ public class ProgressController : ControllerBase
             UserId = user.Id,
             OccurredAt = reviewedAt,
             ActivityType = "Review",
+            // Kavram hangi dilde çalışıldıysa aktivite de o dile ait.
+            LanguageCode = target,
             Result = dto.Rating,
             DurationSeconds = dto.DurationSeconds,
             XpEarned = xpEarned
         };
         await _unitOfWork.Repository<StudyActivity>().AddAsync(activity);
         await DailySummaryEngine.RecordAsync(_unitOfWork, activity);
+        await LanguageProgressEngine.RecordAsync(_unitOfWork, activity, user.TargetLanguage);
 
         StudyEngine.ApplyXp(user, xpEarned);
         await StudyEngine.UpdateStreakAsync(_unitOfWork, user, reviewedAt);
@@ -638,12 +694,16 @@ public class ProgressController : ControllerBase
             DeckId = word.DeckId,
             OccurredAt = reviewedAt,
             ActivityType = "Review",
+            // Kart bir destedeyse destenin dili, değilse öğrenenin o anki
+            // hedef dili (bkz. LanguageProgressEngine.ResolveLanguageAsync).
+            LanguageCode = await LanguageProgressEngine.ResolveLanguageAsync(_unitOfWork, word, user),
             Result = dto.Rating,
             DurationSeconds = dto.DurationSeconds,
             XpEarned = xpEarned
         };
         await _unitOfWork.Repository<StudyActivity>().AddAsync(activity);
         await DailySummaryEngine.RecordAsync(_unitOfWork, activity);
+        await LanguageProgressEngine.RecordAsync(_unitOfWork, activity, user.TargetLanguage);
 
         StudyEngine.ApplyXp(user, xpEarned);
         await StudyEngine.UpdateStreakAsync(_unitOfWork, user, reviewedAt);

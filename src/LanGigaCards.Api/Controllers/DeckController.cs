@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using LanGigaCards.Api.DTOs;
 using LanGigaCards.Api.Services;
 
@@ -50,6 +51,8 @@ public class DeckController : ControllerBase
             .OrderByDescending(deck => deck.UpdatedAt ?? deck.CreatedAt)
             .ToList();
 
+        var nativeTitles = await NativeTitlesAsync(user);
+
         var cards = (await _unitOfWork.Repository<Vocabulary>()
                 .FindAsync(card => card.DeckId != null && decks.Select(d => d.Id).Contains(card.DeckId.Value)))
             .ToList();
@@ -74,6 +77,7 @@ public class DeckController : ControllerBase
                 CoverImageUrl = deck.CoverImageUrl,
                 StarterKey = deck.StarterKey,
                 LanguageCode = deck.LanguageCode,
+                NativeTitle = NativeTitleFor(deck, nativeTitles),
                 CreatedAt = deck.CreatedAt,
                 UpdatedAt = deck.UpdatedAt,
                 CardCount = stats.CardCount,
@@ -111,6 +115,7 @@ public class DeckController : ControllerBase
                     .FindAsync(p => p.UserID == userId.Value && p.WordID != null && wordIds.Contains(p.WordID.Value)))
                 .ToList();
 
+        var owner = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
         var stats = ComputeDeckStats(cards, progress, DateTime.UtcNow);
         return Ok(new
         {
@@ -120,6 +125,7 @@ public class DeckController : ControllerBase
             deck.CoverImageUrl,
             deck.StarterKey,
             deck.LanguageCode,
+            NativeTitle = NativeTitleFor(deck, await NativeTitlesAsync(owner)),
             deck.CreatedAt,
             deck.UpdatedAt,
             stats.CardCount,
@@ -251,6 +257,42 @@ public class DeckController : ControllerBase
         await _unitOfWork.CompleteAsync();
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// Şablon adlarının öğrenenin ana dilindeki karşılıkları, slug ile
+    /// anahtarlı. Deste başına ayrı sorgu atmamak için tek seferde okunuyor.
+    /// </summary>
+    private async Task<Dictionary<string, string>> NativeTitlesAsync(User? user)
+    {
+        var nativeCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user?.NativeLanguageCode);
+        if (nativeCode.Length == 0)
+        {
+            return new Dictionary<string, string>();
+        }
+
+        return await _unitOfWork.Repository<DeckTemplateLabel>().Query()
+            .Where(label => label.LanguageCode == nativeCode)
+            .Select(label => new { label.DeckTemplate!.Slug, label.Title })
+            .ToDictionaryAsync(row => row.Slug, row => row.Title);
+    }
+
+    /// <summary>
+    /// Destenin ana dildeki adı, yoksa null.
+    ///
+    /// Hedef dil ana dille aynı adı veriyorsa da null: "Müzik (Müzik)" bilgi
+    /// taşımaz. Kullanıcının kendi kurduğu destede StarterKey olmadığı için
+    /// zaten null döner — kendi yazdığı ada çeviri uydurulmuyor.
+    /// </summary>
+    private static string? NativeTitleFor(Deck deck, IReadOnlyDictionary<string, string> nativeTitles)
+    {
+        var slug = CategoryDeckSynchronizer.SlugFrom(deck.StarterKey);
+        if (slug.Length == 0 || !nativeTitles.TryGetValue(slug, out var nativeTitle))
+        {
+            return null;
+        }
+
+        return string.Equals(nativeTitle, deck.Title, StringComparison.OrdinalIgnoreCase) ? null : nativeTitle;
     }
 
     private static (int CardCount, int DueCount, double MasteryPercentage, int ReviewsCount) ComputeDeckStats(

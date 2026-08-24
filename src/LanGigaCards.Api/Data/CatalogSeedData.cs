@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 namespace LanGigaCards.Api.Data;
 
@@ -67,7 +67,7 @@ internal static class CatalogSeedData
             // Bir kullanıcının bir günü için tek satır. Benzersizlik burada
             // yalnızca bir kural değil, doğruluk şartı: ikinci bir satır
             // oluşabilseydi aynı gün iki kez sayılırdı.
-            e.HasIndex(s => new { s.UserId, s.Day }).IsUnique();
+            e.HasIndex(s => new { s.UserId, s.Day, s.LanguageCode }).IsUnique();
 
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_DailyStudySummary_Counters",

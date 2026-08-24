@@ -1,4 +1,4 @@
-namespace LanGigaCards.Api.Services;
+﻿namespace LanGigaCards.Api.Services;
 
 /// <summary>
 /// Ham çalışma aktivitesini günlük özete işler.
@@ -15,45 +15,85 @@ namespace LanGigaCards.Api.Services;
 /// </summary>
 internal static class DailySummaryEngine
 {
-    internal static async Task RecordAsync(IUnitOfWork unitOfWork, StudyActivity activity)
+    internal static Task RecordAsync(IUnitOfWork unitOfWork, StudyActivity activity) =>
+        RecordManyAsync(unitOfWork, new[] { activity });
+
+    /// <summary>
+    /// Aynı isteğe ait birden çok aktiviteyi tek geçişte işler.
+    ///
+    /// Tek tek <see cref="RecordAsync"/> çağırmak burada işe yaramaz: özet
+    /// satırı veritabanından okunuyor ve henüz kaydedilmemiş bir satırı
+    /// göremiyor — ikinci aktivite aynı gün için bir satır daha eklemeye
+    /// çalışır ve benzersizlik kısıtına çarpar. Beş soruluk bir kart quizi tam
+    /// olarak bunu yapıyordu.
+    /// </summary>
+    internal static async Task RecordManyAsync(IUnitOfWork unitOfWork, IReadOnlyList<StudyActivity> activities)
     {
-        var day = DateOnly.FromDateTime(activity.OccurredAt);
+        foreach (var group in activities.GroupBy(a => (
+            Day: DateOnly.FromDateTime(a.OccurredAt),
+            Language: (a.LanguageCode ?? string.Empty).Trim().ToLowerInvariant())))
+        {
+            await RecordGroupAsync(unitOfWork, group.Key.Day, group.Key.Language, group.ToList());
+        }
+    }
+
+    private static async Task RecordGroupAsync(
+        IUnitOfWork unitOfWork,
+        DateOnly day,
+        string languageCode,
+        IReadOnlyList<StudyActivity> activities)
+    {
+        var first = activities[0];
         var repository = unitOfWork.Repository<DailyStudySummary>();
 
-        var summary = (await repository.FindAsync(s => s.UserId == activity.UserId && s.Day == day))
+        // Özet dil başına tutuluyor: bir günün iki dilde ayrı satırı olur.
+        // Arama da dili içermek zorunda, yoksa Almanca çalışılan gün Japonca
+        // satırının üzerine yazılırdı.
+        var summary = (await repository.FindAsync(s => s.UserId == first.UserId
+                && s.Day == day
+                && s.LanguageCode == languageCode))
             .FirstOrDefault();
 
         var isNewRow = summary is null;
         if (summary is null)
         {
-            summary = new DailyStudySummary { UserId = activity.UserId, Day = day };
+            summary = new DailyStudySummary
+            {
+                UserId = first.UserId,
+                Day = day,
+                LanguageCode = languageCode
+            };
             await repository.AddAsync(summary);
         }
 
-        switch (activity.ActivityType)
+        foreach (var activity in activities)
         {
-            case "Review":
-                summary.ReviewCount++;
-                // "Again" tekrar görülmesi gereken kart demek; isabet sayısına
-                // girmemeli. Diğer üç değerlendirme (Hard/Medium/Easy) hepsi
-                // hatırlandı anlamına gelir.
-                if (activity.Result is not null && activity.Result != "Again")
-                {
-                    summary.CorrectCount++;
-                }
-                break;
+            switch (activity.ActivityType)
+            {
+                case "Review":
+                    summary.ReviewCount++;
+                    // "Again" tekrar görülmesi gereken kart demek; isabet
+                    // sayısına girmemeli. Diğer üç değerlendirme
+                    // (Hard/Medium/Easy) hatırlandı anlamına gelir.
+                    if (activity.Result is not null && activity.Result != "Again")
+                    {
+                        summary.CorrectCount++;
+                    }
+                    break;
 
-            case "Quiz":
-                summary.QuizCount++;
-                break;
+                case "Quiz":
+                    summary.QuizCount++;
+                    break;
 
-            case "Lesson":
-                summary.LessonCount++;
-                break;
+                case "Lesson":
+                    summary.LessonCount++;
+                    break;
+            }
+
+            summary.StudySeconds += activity.DurationSeconds;
+            summary.XpEarned += activity.XpEarned;
         }
 
-        summary.StudySeconds += activity.DurationSeconds;
-        summary.XpEarned += activity.XpEarned;
         summary.UpdatedAt = DateTime.UtcNow;
 
         // Yalnızca var olan satırda. Yeni eklenen satır hâlâ Added durumunda ve

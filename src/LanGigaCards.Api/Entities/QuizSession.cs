@@ -1,3 +1,5 @@
+﻿using System.ComponentModel.DataAnnotations;
+
 namespace LanGigaCards.Api.Entities;
 
 /// <summary>
@@ -15,6 +17,13 @@ public class QuizSession
 
     public int? DeckId { get; set; }
     public Deck? Deck { get; set; }
+
+    /// <summary>
+    /// Oturumun hangi hedef dilde çözüldüğü. Kart quizinde istemci gönderir ya
+    /// da destenin dilinden türetilir; ders quizlerinde boş kalabilir.
+    /// </summary>
+    [MaxLength(10)]
+    public string? LanguageCode { get; set; }
 
     public int TotalQuestions { get; set; }
     public int CorrectCount { get; set; }
@@ -40,6 +49,13 @@ public class QuizSessionAnswer
 
     public int? SelectedOptionId { get; set; }
     public QuizOption? SelectedOption { get; set; }
+
+    /// <summary>
+    /// Kart quizinde sorunun kelimesi. Ders quizlerinde soru bankadan geldiği
+    /// için burası boş, <see cref="QuizId"/> dolu olur.
+    /// </summary>
+    public int? WordId { get; set; }
+    public Vocabulary? Word { get; set; }
 
     public bool? IsCorrect { get; set; }
     public bool IsSkipped { get; set; }
