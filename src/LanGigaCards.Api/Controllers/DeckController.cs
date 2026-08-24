@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using LanGigaCards.Api.DTOs;
+using LanGigaCards.Api.Services;
 
 namespace LanGigaCards.Api.Controllers;
 
@@ -27,8 +28,25 @@ public class DeckController : ControllerBase
             return Unauthorized();
         }
 
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var currentLanguage = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+
+        // Liste öğrenenin şu an çalıştığı dille sınırlı. Sonradan başka bir dile
+        // geçtiğinde eski dildeki desteleri silinmiyor (CategoryDeckSynchronizer
+        // kendi kuralıyla yalnızca dokunulmamış olanları kaldırıyor); yalnızca
+        // o dile geri dönene kadar listede görünmüyorlar, ilerlemeleri yerinde.
+        //
+        // LanguageCode boş olan desteler bu sütun eklenmeden önce kurulmuş ve
+        // migration ile doldurulamamış olanlar; öğrenenin gözünden kaybolmasınlar
+        // diye her dilde gösteriliyorlar.
         var decks = (await _unitOfWork.Repository<Deck>()
-                .FindAsync(deck => deck.UserId == userId.Value))
+                .FindAsync(deck => deck.UserId == userId.Value
+                    && (deck.LanguageCode == null || deck.LanguageCode == currentLanguage)))
             .OrderByDescending(deck => deck.UpdatedAt ?? deck.CreatedAt)
             .ToList();
 
@@ -55,6 +73,7 @@ public class DeckController : ControllerBase
                 Description = deck.Description,
                 CoverImageUrl = deck.CoverImageUrl,
                 StarterKey = deck.StarterKey,
+                LanguageCode = deck.LanguageCode,
                 CreatedAt = deck.CreatedAt,
                 UpdatedAt = deck.UpdatedAt,
                 CardCount = stats.CardCount,
@@ -100,6 +119,7 @@ public class DeckController : ControllerBase
             deck.Description,
             deck.CoverImageUrl,
             deck.StarterKey,
+            deck.LanguageCode,
             deck.CreatedAt,
             deck.UpdatedAt,
             stats.CardCount,
@@ -124,6 +144,12 @@ public class DeckController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
         var deck = new Deck
         {
             UserId = userId.Value,
@@ -131,6 +157,10 @@ public class DeckController : ControllerBase
             Description = dto.Description?.Trim() ?? string.Empty,
             CoverImageUrl = string.IsNullOrWhiteSpace(dto.CoverImageUrl) ? null : dto.CoverImageUrl.Trim(),
             StarterKey = string.IsNullOrWhiteSpace(dto.StarterKey) ? null : dto.StarterKey.Trim(),
+            // Öğrenenin o an çalıştığı dilden damgalanıyor, istemciden
+            // gelmiyor: her deste kurulduğu dile ait ve yalnızca o dil hedefken
+            // listede görünüyor.
+            LanguageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -144,6 +174,7 @@ public class DeckController : ControllerBase
             deck.Description,
             deck.CoverImageUrl,
             deck.StarterKey,
+            deck.LanguageCode,
             deck.CreatedAt,
             deck.UpdatedAt,
             CardCount = 0,
@@ -188,6 +219,7 @@ public class DeckController : ControllerBase
             deck.Description,
             deck.CoverImageUrl,
             deck.StarterKey,
+            deck.LanguageCode,
             deck.CreatedAt,
             deck.UpdatedAt
 });
@@ -232,15 +264,16 @@ public class DeckController : ControllerBase
         var progress = allProgress.Where(p => p.WordID != null && wordIds.Contains(p.WordID.Value)).ToList();
         var progressByWord = progress.ToDictionary(p => p.WordID!.Value);
 
+        // İlerleme kaydı olmayan kart hiç çalışılmamış demektir; "tekrar zamanı
+        // geldi" değildir. İkisi ayrı durumlar: "due", süresi dolmuş bir önceki
+        // tekrarı ima ediyor, oysa bu kart henüz hiç görülmedi. Eskiden böyle
+        // kartlar da sayıldığı için hiç açılmamış her deste kart sayısının
+        // tamamını "tekrar bekliyor" diye gösteriyordu — yani başlanmamış deste
+        // ile biriktirmiş deste ekranda aynı görünüyordu. Yalnızca tekrar
+        // geçmişi olan ve süresi dolmuş kartlar sayılır.
         var dueCount = cards.Count(card =>
-        {
-            if (!progressByWord.TryGetValue(card.WordID, out var p))
-            {
-                return true;
-            }
-
-            return p.NextReviewDate is null || p.NextReviewDate <= now;
-        });
+            progressByWord.TryGetValue(card.WordID, out var p)
+            && (p.NextReviewDate is null || p.NextReviewDate <= now));
 
         var masteryPercentage = cards.Count == 0
             ? 0

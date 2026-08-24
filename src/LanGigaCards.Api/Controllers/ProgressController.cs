@@ -464,6 +464,11 @@ public class ProgressController : ControllerBase
 
         var reviewedAt = DateTime.UtcNow;
         var isNew = progress is null;
+        // LastReviewedAt aşağıda üzerine yazılmadan önce okunmalı: FsrsEngine,
+        // aradan kaç gün geçtiğini bilmek için bu tekrarın değil bir *önceki*
+        // tekrarın zamanını istiyor.
+        var previousReviewedAt = isNew ? (DateTime?)null : progress!.LastReviewedAt;
+
         progress ??= new UserWordProgress
         {
             UserID = user.Id,
@@ -472,16 +477,24 @@ public class ProgressController : ControllerBase
             LastReviewedAt = reviewedAt
         };
 
-        var schedule = StudyEngine.CalculateReviewSchedule(
-            progress.IntervalDays, progress.EaseFactor, dto.Rating, reviewedAt);
+        var schedule = FsrsEngine.ReviewCard(
+            progress.Stability,
+            progress.Difficulty,
+            previousReviewedAt,
+            dto.Rating,
+            reviewedAt,
+            cefrLevel: dto.DifficultyMode);
 
-        progress.IntervalDays = schedule.IntervalDays;
-        progress.EaseFactor = schedule.EaseFactor;
+        progress.Stability = schedule.Stability;
+        progress.Difficulty = schedule.Difficulty;
+        // Yalnızca süreklilik ve hata ayıklama için tazeleniyor; artık bundan
+        // hiçbir şey hesaplanmıyor (bkz. UserWordProgress'teki açıklama).
+        progress.IntervalDays = Math.Max(1, (int)Math.Round((schedule.NextReviewDate - reviewedAt).TotalDays));
         progress.NextReviewDate = schedule.NextReviewDate;
         progress.LastReviewedAt = reviewedAt;
         progress.LastRating = dto.Rating;
         progress.ReviewCount++;
-        progress.MasteryLevel = Math.Clamp(progress.MasteryLevel + schedule.MasteryDelta, 0, 5);
+        progress.MasteryLevel = schedule.MasteryLevel;
 
         if (isNew)
         {
@@ -582,19 +595,26 @@ public class ProgressController : ControllerBase
 
         var userWordProgress = progress!;
 
-        var schedule = StudyEngine.CalculateReviewSchedule(
-            userWordProgress.IntervalDays,
-            userWordProgress.EaseFactor,
-            dto.Rating,
-            reviewedAt);
+        // Bkz. yukarıdaki kavram tekrarı: geçen süre bir önceki tekrardan
+        // ölçülüyor, bu yüzden alan güncellenmeden okunuyor.
+        var previousReviewedAt = isNewProgress ? (DateTime?)null : userWordProgress.LastReviewedAt;
 
-        userWordProgress.IntervalDays = schedule.IntervalDays;
-        userWordProgress.EaseFactor = schedule.EaseFactor;
+        var schedule = FsrsEngine.ReviewCard(
+            userWordProgress.Stability,
+            userWordProgress.Difficulty,
+            previousReviewedAt,
+            dto.Rating,
+            reviewedAt,
+            cefrLevel: dto.DifficultyMode);
+
+        userWordProgress.Stability = schedule.Stability;
+        userWordProgress.Difficulty = schedule.Difficulty;
+        userWordProgress.IntervalDays = Math.Max(1, (int)Math.Round((schedule.NextReviewDate - reviewedAt).TotalDays));
         userWordProgress.NextReviewDate = schedule.NextReviewDate;
         userWordProgress.LastReviewedAt = reviewedAt;
         userWordProgress.LastRating = dto.Rating;
         userWordProgress.ReviewCount++;
-        userWordProgress.MasteryLevel = Math.Clamp(userWordProgress.MasteryLevel + schedule.MasteryDelta, 0, 5);
+        userWordProgress.MasteryLevel = schedule.MasteryLevel;
         if (isNewProgress)
         {
             await progressRepository.AddAsync(userWordProgress);

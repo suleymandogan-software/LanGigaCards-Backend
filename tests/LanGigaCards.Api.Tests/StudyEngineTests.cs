@@ -1,70 +1,16 @@
-using LanGigaCards.Api.Entities;
+﻿using LanGigaCards.Api.Entities;
 using LanGigaCards.Api.Services;
 using Xunit;
 
 namespace LanGigaCards.Api.Tests;
 
 /// <summary>
-/// The scheduler decides when every card comes back. It touches no database,
-/// so it is worth pinning down exactly.
+/// XP, seviye ve çalışma serisi. Veritabanına hiç dokunmuyorlar, bu yüzden tam
+/// olarak sabitlemeye değer. Tekrar zamanlaması artık burada değil, bkz.
+/// <see cref="FsrsEngineTests"/>.
 /// </summary>
 public sealed class StudyEngineTests
 {
-    private static readonly DateTime ReviewedAt = new(2026, 8, 17, 12, 0, 0, DateTimeKind.Utc);
-
-    [Fact]
-    public void Again_resets_the_interval_and_returns_the_card_within_the_session()
-    {
-        var schedule = StudyEngine.CalculateReviewSchedule(10, 2.5, "Again", ReviewedAt);
-
-        Assert.Equal(0, schedule.IntervalDays);
-        Assert.Equal(ReviewedAt.AddMinutes(10), schedule.NextReviewDate);
-        Assert.Equal(-1, schedule.MasteryDelta);
-        Assert.Equal(2.3, schedule.EaseFactor, 3);
-    }
-
-    [Fact]
-    public void A_first_review_starts_at_one_day_for_medium_and_four_for_easy()
-    {
-        Assert.Equal(1, StudyEngine.CalculateReviewSchedule(0, 2.5, "Medium", ReviewedAt).IntervalDays);
-        Assert.Equal(4, StudyEngine.CalculateReviewSchedule(0, 2.5, "Easy", ReviewedAt).IntervalDays);
-    }
-
-    [Fact]
-    public void Medium_multiplies_the_interval_by_the_ease_factor()
-    {
-        var schedule = StudyEngine.CalculateReviewSchedule(4, 2.5, "Medium", ReviewedAt);
-
-        Assert.Equal(10, schedule.IntervalDays);
-        Assert.Equal(ReviewedAt.AddDays(10), schedule.NextReviewDate);
-        Assert.Equal(2.5, schedule.EaseFactor, 3);
-    }
-
-    [Theory]
-    [InlineData("Again", 1.3)]
-    [InlineData("Hard", 1.3)]
-    public void The_ease_factor_never_falls_below_the_floor(string rating, double expected)
-    {
-        var schedule = StudyEngine.CalculateReviewSchedule(5, 1.3, rating, ReviewedAt);
-
-        Assert.Equal(expected, schedule.EaseFactor, 3);
-    }
-
-    [Fact]
-    public void The_ease_factor_never_rises_above_the_ceiling()
-    {
-        var schedule = StudyEngine.CalculateReviewSchedule(5, 3.0, "Easy", ReviewedAt);
-
-        Assert.Equal(3.0, schedule.EaseFactor, 3);
-    }
-
-    [Fact]
-    public void An_unknown_rating_is_a_programming_error_not_a_default()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => StudyEngine.CalculateReviewSchedule(1, 2.5, "Perfect", ReviewedAt));
-    }
-
     [Fact]
     public void Xp_drives_the_level_and_neither_can_go_negative()
     {

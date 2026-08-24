@@ -2188,6 +2188,10 @@
             "type": "string",
             "nullable": true
           },
+          "languageCode": {
+            "type": "string",
+            "nullable": true
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -2637,6 +2641,10 @@
             "minimum": 0,
             "type": "integer",
             "format": "int32"
+          },
+          "difficultyMode": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

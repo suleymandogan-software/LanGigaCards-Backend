@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace LanGigaCards.Api.DTOs;
 
@@ -55,4 +55,15 @@ public sealed class SubmitReviewDto
 
     [Range(0, 3600)]
     public int DurationSeconds { get; init; }
+
+    /// <summary>
+    /// Öğrenenin kendi bildirdiği CEFR seviyesi (istemcideki "Difficulty Mode"
+    /// seçicisi, A1..C2 — bkz. <c>UserSettings.DifficultyMode</c>). Yalnızca
+    /// yepyeni bir kelimenin başlangıç zorluk tahminini biraz kaydırmak için
+    /// kullanılıyor; bkz.
+    /// <see cref="Services.FsrsEngine.ProficiencyDifficultyOffsetFor"/>.
+    /// İsteğe bağlı ve doğrulanmıyor — tanınmayan ya da hiç gönderilmeyen değer
+    /// hiçbir kaydırma uygulamaz.
+    /// </summary>
+    public string? DifficultyMode { get; init; }
 }

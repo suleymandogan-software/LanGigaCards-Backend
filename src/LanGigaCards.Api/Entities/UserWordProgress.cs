@@ -45,8 +45,28 @@ public class UserWordProgress
     public DateTime LastReviewedAt { get; set; } = DateTime.UtcNow;
 
     public int ReviewCount { get; set; }
+
+    /// <summary>
+    /// Eski SM-2 türevi alanlar. Artık tekrar gönderimi tarafından
+    /// hesaplanmıyor (yerlerini Stability/Difficulty aldı, bkz.
+    /// <see cref="Services.FsrsEngine"/>); yalnızca mevcut satırlar ve bu
+    /// tabloyu dışarıdan okuyan biri bir sütunun kaybolmasıyla bozulmasın diye
+    /// duruyorlar. <see cref="IntervalDays"/> süreklilik için FSRS'in
+    /// hesapladığı aralıkla tazeleniyor, <see cref="EaseFactor"/> ise bundan
+    /// sonra son SM-2 değerinde donmuş kalıyor.
+    /// </summary>
     public double EaseFactor { get; set; } = 2.5;
     public int IntervalDays { get; set; } = 0;
+
+    /// <summary>
+    /// FSRS bellek durumu (bkz. <see cref="Services.FsrsEngine"/>). Sıfır,
+    /// "FSRS altında hiç tekrar edilmedi" demek: ya gerçekten yeni bir kelime,
+    /// ya da bu migration'dan önce var olan satırlarda eski
+    /// EaseFactor/IntervalDays değerlerinden tek seferlik yaklaşık olarak
+    /// doldurulmuş bir kayıt.
+    /// </summary>
+    public double Stability { get; set; } = 0;
+    public double Difficulty { get; set; } = 0;
 
     /// <summary>Son değerlendirme: Again, Hard, Medium, Easy (Figma SRS).</summary>
     public string? LastRating { get; set; }

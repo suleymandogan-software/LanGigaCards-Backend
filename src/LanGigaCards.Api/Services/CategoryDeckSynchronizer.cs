@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 namespace LanGigaCards.Api.Services;
 
@@ -554,6 +554,7 @@ internal static class CategoryDeckSynchronizer
             Title = label.Title,
             Description = label.Description,
             StarterKey = starterKey,
+            LanguageCode = targetCode,
             CreatedAt = now,
             Flashcards = cards
         };

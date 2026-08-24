@@ -1,4 +1,4 @@
-namespace LanGigaCards.Api.DTOs;
+﻿namespace LanGigaCards.Api.DTOs;
 
 public class CategoryDto
 {
@@ -88,6 +88,9 @@ public class DeckSummaryDto
     /// hangi desteleri yenileyeceğini buradan anlar.
     /// </summary>
     public string? StarterKey { get; set; }
+
+    /// <summary>Destenin ait olduğu hedef dilin ISO kodu.</summary>
+    public string? LanguageCode { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }

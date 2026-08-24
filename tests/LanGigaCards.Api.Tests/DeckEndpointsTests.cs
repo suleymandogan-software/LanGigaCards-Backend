@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Xunit;
@@ -76,6 +76,41 @@ public sealed class DeckEndpointsTests : IClassFixture<LanGigaCardsApiFactory>
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_deck_nobody_has_studied_yet_has_nothing_due()
+    {
+        var (client, _) = await SignedInClientAsync("due-count@example.com");
+
+        var created = await client.PostAsJsonAsync("/api/Deck", new
+        {
+            Title = "Hiç açılmamış deste",
+            Description = string.Empty
+        });
+        created.EnsureSuccessStatusCode();
+        var deckId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        foreach (var (term, translation) in new[] { ("Haus", "Ev"), ("Baum", "Ağaç"), ("Wasser", "Su") })
+        {
+            var card = await client.PostAsJsonAsync("/api/Flashcard", new
+            {
+                DeckId = deckId,
+                Term = term,
+                Translation = translation
+            });
+            card.EnsureSuccessStatusCode();
+        }
+
+        var deck = await client.GetFromJsonAsync<JsonElement>($"/api/Deck/{deckId}");
+
+        // Hiç çalışılmamış kart "tekrar zamanı gelmiş" değildir; ikisi ayrı
+        // durumlar. Eskiden ilerleme kaydı olmayan her kart due sayılıyordu, bu
+        // yüzden yeni açılmış deste kart sayısının tamamını "tekrar bekliyor"
+        // diye gösteriyor, başlanmamış deste ile biriktirmiş deste ekranda
+        // birbirinden ayırt edilemiyordu.
+        Assert.Equal(3, deck.GetProperty("cardCount").GetInt32());
+        Assert.Equal(0, deck.GetProperty("dueCount").GetInt32());
     }
 
     private async Task<(HttpClient Client, TestSession Session)> SignedInClientAsync(string email)

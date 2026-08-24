@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace LanGigaCards.Api.Entities;
 
@@ -36,6 +36,18 @@ public class Deck
     /// </summary>
     [MaxLength(40)]
     public string? StarterKey { get; set; }
+
+    /// <summary>
+    /// ISO dil kodu ("de", "tr", "en"...): bu deste hangi hedef dil için.
+    /// Oluşturulduğunda öğrenenin o anki hedef dilinden otomatik damgalanır —
+    /// istemcinin ayrıca göndermesi gerekmez.
+    ///
+    /// Deste listesi buna göre süzülür: öğrenen hedef dilini değiştirdiğinde
+    /// eski dildeki desteler silinmez, yalnızca görünümden çıkar (ilerlemeleri
+    /// yerinde durur) ve o dile geri dönüldüğünde aynen geri gelir.
+    /// </summary>
+    [MaxLength(10)]
+    public string? LanguageCode { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
