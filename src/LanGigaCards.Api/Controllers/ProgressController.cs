@@ -189,8 +189,8 @@ public class ProgressController : ControllerBase
             return Ok(Array.Empty<SessionCardDto>());
         }
 
-        var target = user.TargetLanguageCode;
-        var native = user.NativeLanguageCode;
+        var target = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+        var native = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
 
         // Kart iki çeviriden oluşur: ön yüz hedef dilde, arka yüz ana dilde.
         // Bir kavram ancak ikisi de varsa çalışılabilir — bir dile içerik
@@ -304,8 +304,8 @@ public class ProgressController : ControllerBase
             return Ok(new SessionCountsDto());
         }
 
-        var target = user.TargetLanguageCode;
-        var native = user.NativeLanguageCode;
+        var target = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+        var native = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
 
         var translations = _unitOfWork.Repository<ConceptTranslation>().Query();
 
@@ -445,7 +445,7 @@ public class ProgressController : ControllerBase
             return Unauthorized();
         }
 
-        var target = user.TargetLanguageCode;
+        var target = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
 
         // Hedef dilde çevirisi olmayan bir kavram bu kullanıcıya hiç
         // gösterilmedi; değerlendirmesi de kabul edilmemeli.

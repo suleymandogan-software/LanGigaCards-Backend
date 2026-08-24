@@ -34,6 +34,7 @@ namespace LanGigaCards.Api.Data
         public DbSet<Tag> Tags { get; set; }
         public DbSet<VocabularyTag> VocabularyTags { get; set; }
         public DbSet<DailyStudySummary> DailyStudySummaries { get; set; }
+        public DbSet<SupportTicket> SupportTickets { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -394,6 +395,18 @@ namespace LanGigaCards.Api.Data
             // "find this user's live codes" fast.
             modelBuilder.Entity<EmailVerificationToken>()
                 .HasIndex(t => new { t.UserId, t.Code });
+
+            modelBuilder.Entity<SupportTicket>(e =>
+            {
+                e.HasOne(t => t.User)
+                    .WithMany()
+                    .HasForeignKey(t => t.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // "Bu kullanıcının bildirimleri" tek sorgu; hesap silinirken
+                // cascade de bu indeksi kullanıyor.
+                e.HasIndex(t => t.UserId);
+            });
 
             // Figma Profile categories (Science dahil) — IconName/ColorHex Flutter mock ile hizalı
             modelBuilder.Entity<Category>().HasData(

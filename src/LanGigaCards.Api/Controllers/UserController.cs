@@ -1,6 +1,8 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using LanGigaCards.Api.DTOs;
 
 namespace LanGigaCards.Api.Controllers;
@@ -11,10 +13,12 @@ namespace LanGigaCards.Api.Controllers;
 public class UserController : ControllerBase
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPasswordHasher<User> _passwordHasher;
 
-    public UserController(IUnitOfWork unitOfWork)
+    public UserController(IUnitOfWork unitOfWork, IPasswordHasher<User> passwordHasher)
     {
         _unitOfWork = unitOfWork;
+        _passwordHasher = passwordHasher;
     }
 
     private int? TryGetUserId()
@@ -123,6 +127,61 @@ public class UserController : ControllerBase
         await _unitOfWork.CompleteAsync();
 
         return Ok(new { Message = "Settings updated successfully.", Settings = MapSettings(settings) });
+    }
+
+    [HttpPut("password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        // Boş hash sosyal girişle açılmış, parolası olmayan bir hesabı gösterir:
+        // "mevcut parola" diye doğrulanacak bir şey yok, dolayısıyla bu uçtan
+        // parola belirlenemez. Böyle bir hesap parolaya "şifremi unuttum"
+        // akışıyla geçer (AuthController.ForgotPassword).
+        if (string.IsNullOrEmpty(user.PasswordHash) ||
+            _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, dto.CurrentPassword)
+                == PasswordVerificationResult.Failed)
+        {
+            return BadRequest("Current password is incorrect.");
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, dto.NewPassword);
+
+        // Parola değişimi de sıfırlama gibi bütün cihazları düşürür
+        // (AuthController.ResetPassword ile aynı kural): aksi halde parolayı ele
+        // geçirmiş biri, kurban parolasını değiştirdikten sonra da elindeki
+        // refresh token'la oturumda kalırdı.
+        var now = DateTime.UtcNow;
+        var refreshTokenRepository = _unitOfWork.Repository<RefreshToken>();
+        var activeTokens = await refreshTokenRepository.Query()
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        foreach (var active in activeTokens)
+        {
+            active.RevokedAt = now;
+            refreshTokenRepository.Update(active);
+        }
+
+        userRepository.Update(user);
+        await _unitOfWork.CompleteAsync();
+
+        return Ok(new { Message = "Password changed successfully." });
     }
 
     [HttpGet("categories")]
@@ -294,7 +353,8 @@ public class UserController : ControllerBase
         LongestStreak = user.LongestStreak,
         Level = user.Level,
         TotalXp = user.TotalXp,
-        IsPremium = user.IsPremium
+        IsPremium = user.IsPremium,
+        IsEmailVerified = user.IsEmailVerified
     };
 
     private static CategoryDto MapCategoryDto(Category category) => new()

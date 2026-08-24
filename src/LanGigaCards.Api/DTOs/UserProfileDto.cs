@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace LanGigaCards.Api.DTOs;
 
@@ -19,6 +19,16 @@ public class UserProfileDto
     public int Level { get; set; }
     public int TotalXp { get; set; }
     public bool IsPremium { get; set; }
+
+    /// <summary>
+    /// E-posta doğrulandı mı.
+    ///
+    /// Doğrulama zorunlu değil: kullanıcı kayıttan sonra adımı atlayıp
+    /// uygulamayı kullanmaya devam edebiliyor. Bu yüzden durumun profilde
+    /// görünmesi gerekiyor — hem "hesabım onaysız" bilgisini vermek, hem de
+    /// sonradan tamamlamanın yolunu açık tutmak için.
+    /// </summary>
+    public bool IsEmailVerified { get; set; }
 }
 
 public class UpdateUserProfileDto
@@ -57,4 +67,19 @@ public class UserSettingsDto
     public string ThemeColor { get; set; } = "Purple";
     public string TextSize { get; set; } = "Medium";
     public string DifficultyMode { get; set; } = "Adaptive";
+}
+
+public class ChangePasswordDto
+{
+    [Required]
+    public string CurrentPassword { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Alt sınır kayıttaki kuralla aynı olmalı (bkz. <c>RegisterDto</c>);
+    /// burada gevşek bırakmak, parolasını değiştiren birinin kayıtta kabul
+    /// edilmeyecek bir parolaya geçmesine izin verirdi.
+    /// </summary>
+    [Required]
+    [MinLength(8)]
+    public string NewPassword { get; set; } = string.Empty;
 }
