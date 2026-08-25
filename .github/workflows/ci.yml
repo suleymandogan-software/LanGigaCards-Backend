@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # Pinned to 8.0: the test host runs on the matching runtime on
+          # purpose (see RollForward in LanGigaCards.Api.Tests.csproj).
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore LanGigaCards.slnx
+
+      # -warnaserror keeps the .editorconfig rules honest. The solution builds
+      # clean today; anything that stops being clean should stop the pipeline
+      # rather than accumulate.
+      - name: Build
+        run: dotnet build LanGigaCards.slnx --no-restore --configuration Release -warnaserror
+
+      - name: Test
+        run: dotnet test LanGigaCards.slnx --no-build --configuration Release --verbosity normal
+
+      # A checked-in contract nobody verifies is worse than none: the client
+      # team reads it, and it goes stale the first time a DTO changes. This
+      # regenerates it from the built assembly and fails if the committed copy
+      # has drifted, which makes the file trustworthy rather than decorative.
+      - name: Check the committed API contract is current
+        env:
+          # Program.cs refuses to start without a key. This one signs nothing —
+          # the tool only walks the route table and writes the document.
+          Jwt__Key: contract-generation-key-not-a-secret-32chars
+        run: |
+          dotnet tool restore
+          dotnet swagger tofile --output docs/api/openapi.json \
+            src/LanGigaCards.Api/bin/Release/net8.0/LanGigaCards.Api.dll v1
+          git diff --exit-code -- docs/api/openapi.json

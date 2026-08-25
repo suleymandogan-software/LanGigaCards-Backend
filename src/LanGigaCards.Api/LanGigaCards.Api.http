@@ -1,0 +1,22 @@
+@LanGigaCards_HostAddress = http://localhost:5068
+
+GET {{LanGigaCards_HostAddress}}/api/Categories
+Accept: application/json
+
+###
+
+GET {{LanGigaCards_HostAddress}}/api/Achievements
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+POST {{LanGigaCards_HostAddress}}/api/Auth/login
+Content-Type: application/json
+
+{
+  "email": "sarah@example.com",
+  "password": "Password123"
+}
+
+###
