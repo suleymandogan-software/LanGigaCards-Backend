@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework and friends come from Directory.Build.props, so the
+       tests can never drift onto a different framework than the API. -->
+  <PropertyGroup>
+    <RootNamespace>LanGigaCards.Api.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- The API inherits RollForward=LatestMajor so it runs anywhere, but the
+         test host must not: rolling onto .NET 10 pairs that runtime's
+         System.Text.Json with the 8.0 TestHost, whose response PipeWriter has
+         no UnflushedBytes, and every request through the test server dies
+         serialising its response. LatestPatch keeps the pair matched. -->
+    <RollForward>LatestPatch</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.29" />
+    <!-- SQLite rather than the in-memory provider: the schema leans on 23 CHECK
+         constraints, and only a relational provider enforces them. A test that
+         cannot fail on a constraint violation is not testing this schema. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.29" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LanGigaCards.Api\LanGigaCards.Api.csproj" />
+  </ItemGroup>
+
+</Project>

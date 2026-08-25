@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- TargetFramework, RollForward, Nullable and ImplicitUsings live in
+       Directory.Build.props at the repository root, shared with the tests. -->
+  <PropertyGroup>
+    <RootNamespace>LanGigaCards.Api</RootNamespace>
+    <AssemblyName>LanGigaCards.Api</AssemblyName>
+    <Product>LanGigaCards API</Product>
+    <!-- Unchanged on purpose: the id is the key under which every contributor's
+         Jwt:Key and SMTP credentials are already stored. A new id would silently
+         hide them and the API would refuse to start. -->
+    <UserSecretsId>f07a094b-d00a-4a4b-a2bf-526e44ee23a7</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Apis.Auth" Version="1.69.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.29" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.29">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.29" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.29">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+</Project>

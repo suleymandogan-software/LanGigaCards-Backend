@@ -1,0 +1,528 @@
+﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using LanGigaCards.Api.DTOs;
+using LanGigaCards.Api.Services;
+
+namespace LanGigaCards.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class UserController : ControllerBase
+{
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IPasswordHasher<User> _passwordHasher;
+
+    public UserController(IUnitOfWork unitOfWork, IPasswordHasher<User> passwordHasher)
+    {
+        _unitOfWork = unitOfWork;
+        _passwordHasher = passwordHasher;
+    }
+
+    private int? TryGetUserId()
+    {
+        var raw = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return int.TryParse(raw, out var id) ? id : null;
+    }
+
+    [HttpGet("profile")]
+    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<UserProfileDto>> GetProfile()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return NotFound("User not found.");
+        }
+
+        return Ok(MapProfile(user));
+    }
+
+    [HttpPut("profile")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateUserProfileDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.FirstName) || string.IsNullOrWhiteSpace(dto.LastName))
+        {
+            return BadRequest("FirstName and LastName are required.");
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return NotFound("User not found.");
+        }
+
+        var previousTargetCode = user.TargetLanguageCode;
+
+        user.FirstName = dto.FirstName.Trim();
+        user.LastName = dto.LastName.Trim();
+        user.AvatarUrl = string.IsNullOrWhiteSpace(dto.AvatarUrl) ? user.AvatarUrl : dto.AvatarUrl.Trim();
+        user.NativeLanguage = string.IsNullOrWhiteSpace(dto.NativeLanguage) ? user.NativeLanguage : dto.NativeLanguage.Trim();
+        user.TargetLanguage = string.IsNullOrWhiteSpace(dto.TargetLanguage) ? user.TargetLanguage : dto.TargetLanguage.Trim();
+        user.NativeLanguageCode = string.IsNullOrWhiteSpace(dto.NativeLanguageCode)
+            ? user.NativeLanguageCode
+            : dto.NativeLanguageCode.Trim().ToLowerInvariant();
+        user.TargetLanguageCode = string.IsNullOrWhiteSpace(dto.TargetLanguageCode)
+            ? user.TargetLanguageCode
+            : dto.TargetLanguageCode.Trim().ToLowerInvariant();
+        user.TargetProficiencyLevel = string.IsNullOrWhiteSpace(dto.TargetProficiencyLevel)
+            ? user.TargetProficiencyLevel
+            : dto.TargetProficiencyLevel.Trim();
+        user.DailyGoalMinutes = dto.DailyGoalMinutes > 0 ? dto.DailyGoalMinutes : user.DailyGoalMinutes;
+
+        userRepository.Update(user);
+
+        // Hedef dilin profil satırı her koşulda var olmalı: istatistik, seri ve
+        // "en son çalışılan" bilgisi oraya yazılıyor. Yeni bir dile geçildiğinde
+        // satır burada açılır ve kurulumu tamamlanmamış olarak işaretlenir —
+        // istemci seviye ölçümü ve kategori penceresini bu bayrağa bakarak açar.
+        var languageChanged = !string.Equals(previousTargetCode, user.TargetLanguageCode, StringComparison.OrdinalIgnoreCase);
+
+        // Hedef dil ana dille aynıysa profil açılmıyor: öğrenilen bir dil değil.
+        // Onboarding sırasında ikisi bir an için eşit kalabiliyor ve o anda
+        // açılan satır, kullanıcının hiç çalışmadığı bir dili "öğrendiklerim"
+        // listesine sokardı. Aynı kural switch ucunda da var.
+        var nativeCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
+        var targetCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.TargetLanguageCode);
+        var languageProfile = targetCode.Length == 0 || targetCode == nativeCode
+            ? null
+            : await LanguageProgressEngine.GetOrCreateAsync(
+                _unitOfWork,
+                userId.Value,
+                user.TargetLanguageCode,
+                user.TargetLanguage,
+                user.TargetProficiencyLevel);
+
+        // Seviye bu ekrandan değiştirildiyse dil profiline de işlenir; ikisi
+        // ayrışırsa kelime seçimi bir değeri, ekran başka birini gösterir.
+        if (languageProfile is not null && !languageChanged &&
+            !string.IsNullOrWhiteSpace(dto.TargetProficiencyLevel) &&
+            !string.Equals(languageProfile.ProficiencyLevel, user.TargetProficiencyLevel, StringComparison.OrdinalIgnoreCase))
+        {
+            languageProfile.ProficiencyLevel = user.TargetProficiencyLevel;
+            languageProfile.DifficultyMode = LanguageProgressEngine.DifficultyModeFor(user.TargetProficiencyLevel);
+            if (languageProfile.Id != 0)
+            {
+                _unitOfWork.Repository<UserLanguageProfile>().Update(languageProfile);
+            }
+        }
+
+        await _unitOfWork.CompleteAsync();
+
+        // Kitaplık yalnızca kurulumu tamamlanmış diller için eşitlenir. Yeni bir
+        // dilde seviye ve ilgi alanları henüz sorulmadı; deste kurmak için
+        // kurulum penceresinin sonucunu bekliyoruz
+        // (PUT /api/User/languages/{code}/setup).
+        if (languageChanged && languageProfile?.IsSetupCompleted == true)
+        {
+            await CategoryDeckSynchronizer.SyncAsync(_unitOfWork, userId.Value);
+        }
+
+        return Ok(new { Message = "Profile updated successfully.", Profile = MapProfile(user) });
+    }
+
+    [HttpGet("settings")]
+    public async Task<IActionResult> GetSettings()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var settings = await GetOrCreateSettingsAsync(userId.Value);
+        return Ok(MapSettings(settings));
+    }
+
+    [HttpPut("settings")]
+    public async Task<IActionResult> UpdateSettings([FromBody] UserSettingsDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var settingsRepository = _unitOfWork.Repository<UserSettings>();
+        var settings = await GetOrCreateSettingsAsync(userId.Value);
+
+        var previousDifficulty = settings.DifficultyMode;
+
+        settings.DarkMode = dto.DarkMode;
+        settings.DailyReminders = dto.DailyReminders;
+        settings.SoundEffects = dto.SoundEffects;
+        settings.ThemeColor = string.IsNullOrWhiteSpace(dto.ThemeColor) ? settings.ThemeColor : dto.ThemeColor.Trim();
+        settings.TextSize = string.IsNullOrWhiteSpace(dto.TextSize) ? settings.TextSize : dto.TextSize.Trim();
+        settings.DifficultyMode = string.IsNullOrWhiteSpace(dto.DifficultyMode)
+            ? settings.DifficultyMode
+            : dto.DifficultyMode.Trim();
+
+        settingsRepository.Update(settings);
+        await _unitOfWork.CompleteAsync();
+
+        // Kademe kelime seçimini belirliyor: seviye yükseldiyse kategori
+        // destelerine artık kapsama giren kartlar eklenir. Seviye düştüğünde
+        // hiçbir şey silinmez — o kartlarda ilerleme olabilir.
+        if (!string.Equals(previousDifficulty, settings.DifficultyMode, StringComparison.OrdinalIgnoreCase))
+        {
+            await CategoryDeckSynchronizer.SyncAsync(_unitOfWork, userId.Value);
+        }
+
+        return Ok(new { Message = "Settings updated successfully.", Settings = MapSettings(settings) });
+    }
+
+    [HttpPut("password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        // Boş hash sosyal girişle açılmış, parolası olmayan bir hesabı gösterir:
+        // "mevcut parola" diye doğrulanacak bir şey yok, dolayısıyla bu uçtan
+        // parola belirlenemez. Böyle bir hesap parolaya "şifremi unuttum"
+        // akışıyla geçer (AuthController.ForgotPassword).
+        if (string.IsNullOrEmpty(user.PasswordHash) ||
+            _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, dto.CurrentPassword)
+                == PasswordVerificationResult.Failed)
+        {
+            return BadRequest("Current password is incorrect.");
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, dto.NewPassword);
+
+        // Parola değişimi de sıfırlama gibi bütün cihazları düşürür
+        // (AuthController.ResetPassword ile aynı kural): aksi halde parolayı ele
+        // geçirmiş biri, kurban parolasını değiştirdikten sonra da elindeki
+        // refresh token'la oturumda kalırdı.
+        var now = DateTime.UtcNow;
+        var refreshTokenRepository = _unitOfWork.Repository<RefreshToken>();
+        var activeTokens = await refreshTokenRepository.Query()
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        foreach (var active in activeTokens)
+        {
+            active.RevokedAt = now;
+            refreshTokenRepository.Update(active);
+        }
+
+        userRepository.Update(user);
+        await _unitOfWork.CompleteAsync();
+
+        return Ok(new { Message = "Password changed successfully." });
+    }
+
+    /// <summary>
+    /// Hesabı siler.
+    ///
+    /// <para>
+    /// Silme işaretlemedir: <c>Users</c> satırı ve ona bağlı her şey —
+    /// desteler, kartlar, kelime ilerlemesi, çalışma geçmişi — veritabanında
+    /// olduğu gibi kalır, satır yalnızca <see cref="User.IsDeleted"/> ile
+    /// işaretlenir. Gerekçe o alanın üzerinde yazılı.
+    /// </para>
+    ///
+    /// <para>
+    /// İşaretlenen hesap bundan sonra hiçbir sorguda görünmez: giriş
+    /// yapılamaz, elde kalmış erişim anahtarı da işe yaramaz. Yenileme
+    /// anahtarları ayrıca iptal ediliyor — süzgeç zaten yeterli, ama
+    /// kullanılamaz bir kimlik bilgisini satırda tutmanın bir nedeni yok.
+    /// </para>
+    ///
+    /// <para>
+    /// Aynı e-postayla yeniden kayıt olmak mümkün: benzersizlik indeksi
+    /// yalnızca silinmemiş hesapları kapsıyor. Yeni kayıt yeni bir hesaptır;
+    /// eskisinin ilerlemesini devralmaz.
+    /// </para>
+    /// </summary>
+    [HttpDelete]
+    public async Task<IActionResult> DeleteMyAccount()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var userRepository = _unitOfWork.Repository<User>();
+        var user = await userRepository.GetByIdAsync(userId.Value);
+        if (user is null)
+        {
+            // Süzgeç yüzünden zaten silinmiş bir hesap da buraya düşer; iki
+            // durumu ayırmıyoruz — çağıran için sonuç aynı.
+            return NotFound("User not found.");
+        }
+
+        user.IsDeleted = true;
+        user.DeletedAt = DateTime.UtcNow;
+        userRepository.Update(user);
+
+        // Token'lar bizde kendi tablosunda; "sütunu temizle" yerine kullanıcının
+        // açık oturumlarını tek tek iptal etmek gerekiyor (AuthController
+        // .ResetPassword ve yukarıdaki ChangePassword ile aynı kalıp).
+        var now = DateTime.UtcNow;
+        var refreshTokenRepository = _unitOfWork.Repository<RefreshToken>();
+        var activeTokens = await refreshTokenRepository.Query()
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        foreach (var active in activeTokens)
+        {
+            active.RevokedAt = now;
+            refreshTokenRepository.Update(active);
+        }
+
+        await _unitOfWork.CompleteAsync();
+
+        return NoContent();
+    }
+
+    [HttpGet("categories")]
+    [ProducesResponseType(typeof(IEnumerable<CategoryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<CategoryDto>>> GetMyCategories()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        var languageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user?.TargetLanguageCode);
+
+        // Dilsiz satırlar bu alan eklenmeden önce yapılmış seçimler; her dilde
+        // geçerli sayılıyorlar.
+        var links = await _unitOfWork.Repository<UserCategory>()
+            .FindAsync(link => link.UserId == userId.Value
+                && (link.LanguageCode == languageCode || link.LanguageCode == ""));
+        var categoryIds = links.Select(link => link.CategoryId).ToHashSet();
+        var categories = categoryIds.Count == 0
+            ? new List<Category>()
+            : (await _unitOfWork.Repository<Category>()
+                    .FindAsync(category => categoryIds.Contains(category.Id)))
+                .OrderBy(category => category.Id)
+                .ToList();
+
+        return Ok(categories.Select(MapCategoryDto));
+    }
+
+    [HttpPut("categories")]
+    [ProducesResponseType(typeof(IEnumerable<CategoryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<CategoryDto>>> ReplaceMyCategories([FromBody] ReplaceUserCategoriesDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var requestedIds = (dto.CategoryIds ?? new List<int>()).Distinct().ToList();
+        if (requestedIds.Count > 0)
+        {
+            var existingCategories = await _unitOfWork.Repository<Category>()
+                .FindAsync(category => requestedIds.Contains(category.Id));
+            if (existingCategories.Count() != requestedIds.Count)
+            {
+                return BadRequest("One or more category ids are invalid.");
+            }
+        }
+
+        // Seçim hedef dile ait: Almanca çalışırken yemek konusunu isteyen biri
+        // Japoncada istemeyebilir. Bu yüzden yalnızca o dilin satırları
+        // değiştiriliyor; başka dillerinki yerinde kalıyor.
+        var user = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
+        var languageCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user?.TargetLanguageCode);
+
+        var linkRepository = _unitOfWork.Repository<UserCategory>();
+        var current = await linkRepository.FindAsync(link => link.UserId == userId.Value
+            && (link.LanguageCode == languageCode || link.LanguageCode == ""));
+        foreach (var link in current)
+        {
+            linkRepository.Delete(link);
+        }
+
+        foreach (var categoryId in requestedIds)
+        {
+            await linkRepository.AddAsync(new UserCategory
+            {
+                UserId = userId.Value,
+                CategoryId = categoryId,
+                LanguageCode = languageCode
+            });
+        }
+
+        await _unitOfWork.CompleteAsync();
+
+        // Seçim kaydedildikten sonra kitaplığı ona göre kur: yeni kategorinin
+        // destesi eklenir, çıkarılan kategorininki kaldırılır. Kullanıcı bu
+        // ekranı kapattığında kitaplığın hazır olması gerekiyor, bu yüzden arka
+        // plana atılmıyor.
+        await CategoryDeckSynchronizer.SyncAsync(_unitOfWork, userId.Value);
+
+        return await GetMyCategories();
+    }
+
+    [HttpGet("learning-purposes")]
+    [ProducesResponseType(typeof(IEnumerable<LearningPurposeDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<LearningPurposeDto>>> GetMyLearningPurposes()
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var links = await _unitOfWork.Repository<UserLearningPurpose>()
+            .FindAsync(link => link.UserId == userId.Value);
+        var purposeIds = links.Select(link => link.LearningPurposeId).ToHashSet();
+        var purposes = purposeIds.Count == 0
+            ? new List<LearningPurpose>()
+            : (await _unitOfWork.Repository<LearningPurpose>()
+                    .FindAsync(purpose => purposeIds.Contains(purpose.Id)))
+                .OrderBy(purpose => purpose.Id)
+                .ToList();
+
+        return Ok(purposes.Select(MapLearningPurposeDto));
+    }
+
+    [HttpPut("learning-purposes")]
+    [ProducesResponseType(typeof(IEnumerable<LearningPurposeDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<LearningPurposeDto>>> ReplaceMyLearningPurposes([FromBody] ReplaceUserLearningPurposesDto dto)
+    {
+        var userId = TryGetUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var requestedIds = (dto.LearningPurposeIds ?? new List<int>()).Distinct().ToList();
+        if (requestedIds.Count > 0)
+        {
+            var existingPurposes = await _unitOfWork.Repository<LearningPurpose>()
+                .FindAsync(purpose => requestedIds.Contains(purpose.Id));
+            if (existingPurposes.Count() != requestedIds.Count)
+            {
+                return BadRequest("One or more learning purpose ids are invalid.");
+            }
+        }
+
+        var linkRepository = _unitOfWork.Repository<UserLearningPurpose>();
+        var current = await linkRepository.FindAsync(link => link.UserId == userId.Value);
+        foreach (var link in current)
+        {
+            linkRepository.Delete(link);
+        }
+
+        foreach (var purposeId in requestedIds)
+        {
+            await linkRepository.AddAsync(new UserLearningPurpose
+            {
+                UserId = userId.Value,
+                LearningPurposeId = purposeId
+            });
+        }
+
+        await _unitOfWork.CompleteAsync();
+        return await GetMyLearningPurposes();
+    }
+
+    private async Task<UserSettings> GetOrCreateSettingsAsync(int userId)
+    {
+        var settingsRepository = _unitOfWork.Repository<UserSettings>();
+        var existing = (await settingsRepository.FindAsync(s => s.UserId == userId)).FirstOrDefault();
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var created = new UserSettings { UserId = userId };
+        await settingsRepository.AddAsync(created);
+        await _unitOfWork.CompleteAsync();
+        return created;
+    }
+
+    private static UserProfileDto MapProfile(User user) => new()
+    {
+        FirstName = user.FirstName,
+        LastName = user.LastName,
+        Email = user.Email,
+        AvatarUrl = user.AvatarUrl,
+        NativeLanguage = user.NativeLanguage,
+        TargetLanguage = user.TargetLanguage,
+        NativeLanguageCode = user.NativeLanguageCode,
+        TargetLanguageCode = user.TargetLanguageCode,
+        TargetProficiencyLevel = user.TargetProficiencyLevel,
+        DailyGoalMinutes = user.DailyGoalMinutes,
+        CurrentStreak = user.CurrentStreak,
+        LongestStreak = user.LongestStreak,
+        Level = user.Level,
+        TotalXp = user.TotalXp,
+        IsPremium = user.IsPremium,
+        IsEmailVerified = user.IsEmailVerified
+    };
+
+    private static CategoryDto MapCategoryDto(Category category) => new()
+    {
+        Id = category.Id,
+        Name = category.Name,
+        Description = category.Description,
+        IconName = category.IconName,
+        ColorHex = category.ColorHex
+    };
+
+    private static LearningPurposeDto MapLearningPurposeDto(LearningPurpose purpose) => new()
+    {
+        Id = purpose.Id,
+        Name = purpose.Name,
+        Description = purpose.Description
+    };
+
+    private static UserSettingsDto MapSettings(UserSettings settings) => new()
+    {
+        DarkMode = settings.DarkMode,
+        DailyReminders = settings.DailyReminders,
+        SoundEffects = settings.SoundEffects,
+        ThemeColor = settings.ThemeColor,
+        TextSize = settings.TextSize,
+        DifficultyMode = settings.DifficultyMode
+    };
+}

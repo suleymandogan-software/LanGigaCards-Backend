@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- Settings every project in the repository shares. Keeping them here means
+       the test project cannot drift from the API it tests. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- A net8.0 app refuses to start ("You must install or update .NET") on a
+         machine that only has a newer runtime. Rolling forward keeps the project
+         on net8.0 while letting it run on whatever major version is installed,
+         so contributors do not all have to pin the same runtime. -->
+    <RollForward>LatestMajor</RollForward>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- IDE0005 (unused using) only runs when the compiler is also producing
+         the XML documentation file; without this it warns that it is disabled,
+         which is itself a warning CI would fail on. CS1591 is silenced with
+         it: the doc file is a means to the analyser here, not a deliverable,
+         and demanding a <summary> on every public member would bury the
+         comments that do exist. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>
