@@ -13,7 +13,8 @@ public static class AchievementEvaluator
     public static async Task<IReadOnlyList<Badge>> UnlockEligibleAsync(
         IUnitOfWork unitOfWork,
         User user,
-        StudyActivity? pendingActivity = null)
+        StudyActivity? pendingActivity = null,
+        QuizSession? pendingQuizSession = null)
     {
         var badges = (await unitOfWork.Repository<Badge>().GetAllAsync()).ToList();
         var unlockedBadgeIds = (await unitOfWork.Repository<UserBadge>()
@@ -21,8 +22,17 @@ public static class AchievementEvaluator
             .Select(userBadge => userBadge.BadgeId)
             .ToHashSet();
 
+        // A QuizSession created earlier in the same request (SubmitCardQuiz)
+        // is only Added, not yet SaveChanges'd -- a fresh query for it here
+        // would come back empty, so PerfectQuiz could never fire on the very
+        // session that just earned it. pendingActivity below has the same
+        // problem for a brand-new StudyActivity; an already-tracked update
+        // (e.g. SubmitAnswer setting CompletedAt on a session fetched
+        // earlier in its own request) doesn't need this -- EF's identity
+        // resolution already reflects that in a fresh query.
         var quizSessions = (await unitOfWork.Repository<QuizSession>()
                 .FindAsync(session => session.UserId == user.Id && session.CompletedAt != null))
+            .AppendIfNotNull(pendingQuizSession)
             .ToList();
         var wordProgresses = (await unitOfWork.Repository<UserWordProgress>()
                 .FindAsync(progress => progress.UserID == user.Id))
