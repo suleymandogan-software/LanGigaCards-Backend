@@ -125,13 +125,20 @@ public sealed class LanguageProfileTests : IClassFixture<LanGigaCardsApiFactory>
     }
 
     [Fact]
-    public async Task The_target_language_cannot_be_the_native_one()
+    public async Task Switching_to_a_language_matching_the_app_language_succeeds()
     {
-        var client = await LearnerAsync("same-language@example.com");
+        // NativeLanguageCode is just the account's App Language (interface
+        // locale) now, not a paired "native" half of a native/target
+        // couple -- it no longer restricts which languages can be learned.
+        // A learner whose App Language happens to be Turkish must still be
+        // able to pick Turkish as a target.
+        var client = await LearnerAsync("app-language-match@example.com");
 
         var response = await client.PutAsJsonAsync("/api/User/languages/switch", new { LanguageCode = "TR" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        response.EnsureSuccessStatusCode();
+        var profile = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("tr", profile.GetProperty("languageCode").GetString());
     }
 
     private async Task<HttpClient> LearnerAsync(string email)

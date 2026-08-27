@@ -130,12 +130,12 @@ public class UserLanguagesController : ControllerBase
             return Unauthorized();
         }
 
-        var nativeCode = await LanguageCodeResolver.ResolveAsync(_unitOfWork, user.NativeLanguageCode);
-        if (nativeCode == code)
-        {
-            return BadRequest("Target language cannot be the same as the native language.");
-        }
-
+        // NativeLanguageCode no longer restricts which languages can be
+        // learned -- it's just the account's App Language (interface
+        // locale), unrelated to target-language choice now that native and
+        // target aren't a paired, mutually-exclusive pair. This check was
+        // left over from that old model and silently blocked switching to
+        // any language that happened to match the learner's App Language.
         var name = await ResolveLanguageNameAsync(code, dto.LanguageName);
 
         var profile = await LanguageProgressEngine.GetOrCreateAsync(_unitOfWork, userId.Value, code, name);
