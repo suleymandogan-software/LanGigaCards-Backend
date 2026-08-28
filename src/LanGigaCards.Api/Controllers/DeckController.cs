@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +52,7 @@ public class DeckController : ControllerBase
             .ToList();
 
         var nativeTitles = await NativeTitlesAsync(user);
+        var visuals = await VisualsAsync();
 
         var cards = (await _unitOfWork.Repository<Vocabulary>()
                 .FindAsync(card => card.DeckId != null && decks.Select(d => d.Id).Contains(card.DeckId.Value)))
@@ -69,6 +70,7 @@ public class DeckController : ControllerBase
         {
             var deckCards = cards.Where(card => card.DeckId == deck.Id).ToList();
             var stats = ComputeDeckStats(deckCards, progress, now);
+            var visual = VisualFor(deck, visuals);
             return new DeckSummaryDto
             {
                 Id = deck.Id,
@@ -78,10 +80,13 @@ public class DeckController : ControllerBase
                 StarterKey = deck.StarterKey,
                 LanguageCode = deck.LanguageCode,
                 NativeTitle = NativeTitleFor(deck, nativeTitles),
+                Emoji = visual?.Emoji,
+                ColorHex = visual?.ColorHex,
                 CreatedAt = deck.CreatedAt,
                 UpdatedAt = deck.UpdatedAt,
                 CardCount = stats.CardCount,
                 DueCount = stats.DueCount,
+                StudyCount = stats.StudyCount,
                 MasteryPercentage = stats.MasteryPercentage,
                 ReviewsCount = stats.ReviewsCount
             };
@@ -117,6 +122,7 @@ public class DeckController : ControllerBase
 
         var owner = await _unitOfWork.Repository<User>().GetByIdAsync(userId.Value);
         var stats = ComputeDeckStats(cards, progress, DateTime.UtcNow);
+        var visual = VisualFor(deck, await VisualsAsync());
         return Ok(new
         {
             deck.Id,
@@ -126,10 +132,13 @@ public class DeckController : ControllerBase
             deck.StarterKey,
             deck.LanguageCode,
             NativeTitle = NativeTitleFor(deck, await NativeTitlesAsync(owner)),
+            Emoji = visual?.Emoji,
+            ColorHex = visual?.ColorHex,
             deck.CreatedAt,
             deck.UpdatedAt,
             stats.CardCount,
             stats.DueCount,
+            stats.StudyCount,
             stats.MasteryPercentage,
             stats.ReviewsCount,
             Cards = cards.Select(MapCard)
@@ -185,6 +194,7 @@ public class DeckController : ControllerBase
             deck.UpdatedAt,
             CardCount = 0,
             DueCount = 0,
+            StudyCount = 0,
             MasteryPercentage = 0,
             ReviewsCount = 0
         });
@@ -248,6 +258,26 @@ public class DeckController : ControllerBase
 
         var cards = await _unitOfWork.Repository<Vocabulary>()
             .FindAsync(card => card.DeckId == id);
+        var cardIds = cards.Select(card => card.WordID).ToHashSet();
+
+        // UserLanguageProfile.LastStudiedDeckId/LastStudiedWordId point here
+        // with DeleteBehavior.NoAction on purpose (see AppDbContext's own
+        // comment on that mapping) -- the streak/XP/level a deck deletion
+        // must never take down live in that same row, so EF can't cascade
+        // the delete for us. Left unhandled, deleting whichever deck (or
+        // word in it) happens to be the account's "last studied" throws a
+        // real FK violation instead of the deck actually deleting.
+        var affectedProfiles = await _unitOfWork.Repository<UserLanguageProfile>()
+            .FindAsync(profile => profile.UserId == userId.Value &&
+                (profile.LastStudiedDeckId == id ||
+                 (profile.LastStudiedWordId != null && cardIds.Contains(profile.LastStudiedWordId.Value))));
+        foreach (var profile in affectedProfiles)
+        {
+            profile.LastStudiedDeckId = null;
+            profile.LastStudiedWordId = null;
+            _unitOfWork.Repository<UserLanguageProfile>().Update(profile);
+        }
+
         foreach (var card in cards)
         {
             _unitOfWork.Repository<Vocabulary>().Delete(card);
@@ -295,7 +325,29 @@ public class DeckController : ControllerBase
         return string.Equals(nativeTitle, deck.Title, StringComparison.OrdinalIgnoreCase) ? null : nativeTitle;
     }
 
-    private static (int CardCount, int DueCount, double MasteryPercentage, int ReviewsCount) ComputeDeckStats(
+    /// <summary>
+    /// Şablon başına emoji/renk, slug ile anahtarlı. Emoji ve renk dilden
+    /// bağımsız olduğu için -- <see cref="NativeTitlesAsync"/>'in aksine --
+    /// öğrenenin diline göre süzülmez, tüm şablonlar tek sorguda okunur.
+    /// </summary>
+    private async Task<Dictionary<string, (string Emoji, string ColorHex)>> VisualsAsync()
+    {
+        return await _unitOfWork.Repository<DeckTemplate>().Query()
+            .ToDictionaryAsync(t => t.Slug, t => (t.Emoji, t.ColorHex));
+    }
+
+    /// <summary>
+    /// Destenin emoji/rengi, yoksa null -- kullanıcının kendi kurduğu deste
+    /// ve istemcinin "starter_" destelerinde şablon karşılığı olmadığı için
+    /// zaten null döner; istemci o durumda kendi varsayılanını kullanır.
+    /// </summary>
+    private static (string Emoji, string ColorHex)? VisualFor(Deck deck, IReadOnlyDictionary<string, (string Emoji, string ColorHex)> visuals)
+    {
+        var slug = CategoryDeckSynchronizer.SlugFrom(deck.StarterKey);
+        return slug.Length == 0 || !visuals.TryGetValue(slug, out var visual) ? null : visual;
+    }
+
+    private static (int CardCount, int DueCount, int StudyCount, double MasteryPercentage, int ReviewsCount) ComputeDeckStats(
         IReadOnlyCollection<Vocabulary> cards,
         IReadOnlyCollection<UserWordProgress> allProgress,
         DateTime now)
@@ -317,6 +369,16 @@ public class DeckController : ControllerBase
             progressByWord.TryGetValue(card.WordID, out var p)
             && (p.NextReviewDate is null || p.NextReviewDate <= now));
 
+        // Aynı kriter GetDueReviews'daki ile birebir aynı olmalı: bu alan
+        // "Study" düğmesine basılırsa gerçekte kaç kart geleceğinin sözü,
+        // dueCount'un aksine hiç çalışılmamış kartları da (progress kaydı
+        // yok demek) sayar. İkisi kasıtlı olarak ayrışıyor -- bkz.
+        // DeckSummaryDto.StudyCount'un kendi belgesi.
+        var studyCount = cards.Count(card =>
+            !progressByWord.TryGetValue(card.WordID, out var p)
+            || p.NextReviewDate is null
+            || p.NextReviewDate <= now);
+
         var masteryPercentage = cards.Count == 0
             ? 0
             : Math.Round(
@@ -326,7 +388,7 @@ public class DeckController : ControllerBase
                         : 0),
                 1);
 
-        return (cards.Count, dueCount, masteryPercentage, progress.Sum(p => p.ReviewCount));
+        return (cards.Count, dueCount, studyCount, masteryPercentage, progress.Sum(p => p.ReviewCount));
     }
 
     private static object MapCard(Vocabulary card) => new

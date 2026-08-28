@@ -1,4 +1,4 @@
-﻿namespace LanGigaCards.Api.DTOs;
+namespace LanGigaCards.Api.DTOs;
 
 public class CategoryDto
 {
@@ -111,10 +111,43 @@ public class DeckSummaryDto
     /// </summary>
     public string? NativeTitle { get; set; }
 
+    /// <summary>
+    /// Deste kartındaki emoji ("💻") -- yalnızca şablondan kurulmuş kategori
+    /// destelerinde dolu (bkz. <see cref="DeckTemplate.Emoji"/>). Kullanıcının
+    /// kendi destesinde ve istemcinin kendi "starter_" destelerinde null:
+    /// ikisinin de burada karşılığı yok, istemci kendi varsayılanını kullanır.
+    /// </summary>
+    public string? Emoji { get; set; }
+
+    /// <summary>Deste kartının vurgu rengi ("#06B6D4"), aynı kaynaktan.</summary>
+    public string? ColorHex { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int CardCount { get; set; }
+
+    /// <summary>
+    /// Süresi geçmiş, gerçekten "gecikmiş" tekrar sayısı — yalnızca daha önce
+    /// en az bir kez çalışılmış kartları sayar. Hiç açılmamış bir destenin
+    /// kartları burada 0 kalır: henüz hiç görülmemiş bir kart "tekrar zamanı
+    /// gelmiş" değildir, bu ikisi ayrı durumlar. Kırmızı "X gecikmiş" rozeti
+    /// bu alanı okur.
+    /// </summary>
     public int DueCount { get; set; }
+
+    /// <summary>
+    /// "Study" düğmesine basılırsa gerçekten kaç kart gelecek --
+    /// <c>ProgressController.GetDueReviews</c> ile birebir aynı
+    /// kritere göre: hiç çalışılmamış her kart <em>ve</em> süresi geçmiş her
+    /// kart. <see cref="DueCount"/>'tan kasıtlı olarak farklı -- deste hiç
+    /// açılmamışsa DueCount 0 kalır (henüz "gecikmiş" değil) ama StudyCount
+    /// yine de deste kartlarının tamamını sayar (hepsi ilk kez görülecek).
+    /// Bir desteyi kısmen çalışıp yarıda bırakınca da bu iki sayı ayrışır:
+    /// henüz görülmemiş kartlar DueCount'ta hiç görünmez, oysa bir sonraki
+    /// oturum onları da getirir -- StudyCount bunu doğru yansıtır.
+    /// </summary>
+    public int StudyCount { get; set; }
+
     public double MasteryPercentage { get; set; }
     public int ReviewsCount { get; set; }
 }
