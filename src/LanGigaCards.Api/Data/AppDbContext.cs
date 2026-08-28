@@ -584,6 +584,10 @@ namespace LanGigaCards.Api.Data
             // havuzunu paylaşır, ayrı bir metin tablosu tutmaz.
             CategoryCatalogSeedData.Apply(modelBuilder);
 
+            // İlk kataloğun 540 kelimesine ek ikinci parti: şablon başına
+            // sekiz yeni kelime, aynı on beş şablona 37-44 sıralarında eklenir.
+            CategoryCatalogExpansionSeedData.Apply(modelBuilder);
+
             modelBuilder.Entity<Quiz>().HasData(
                 new Quiz { QuizID = 1, LessonID = 1, QuestionText = "What does 'Merhaba' mean?", QuestionType = "MultipleChoice", Points = 1, TimeLimitSeconds = 20 },
                 new Quiz { QuizID = 2, LessonID = 1, QuestionText = "How do you say 'Good morning' in Turkish?", QuestionType = "MultipleChoice", Points = 1, TimeLimitSeconds = 20 },

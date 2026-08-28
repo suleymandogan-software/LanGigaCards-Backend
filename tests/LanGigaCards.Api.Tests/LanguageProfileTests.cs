@@ -87,7 +87,11 @@ public sealed class LanguageProfileTests : IClassFixture<LanGigaCardsApiFactory>
         // Japonca yeni başlayan biri için deste dar, Almanca ileri seviye için
         // geniş: tavan dile göre uygulanıyor.
         var japaneseDeck = (await client.GetFromJsonAsync<JsonElement>("/api/Deck")).EnumerateArray().Single();
-        Assert.Equal(10, japaneseDeck.GetProperty("cardCount").GetInt32());
+
+        // 13 = müzik şablonunun A1 üyeleri: ilk kataloğun 10'u +
+        // CategoryCatalogExpansionSeedData'nın eklediği 3 yeni A1 kelimesi
+        // (guitar/trumpet/duet).
+        Assert.Equal(13, japaneseDeck.GetProperty("cardCount").GetInt32());
 
         var languages = (await client.GetFromJsonAsync<JsonElement>("/api/User/languages")).EnumerateArray().ToList();
         Assert.Equal(2, languages.Count);

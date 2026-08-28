@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Xunit;
@@ -35,6 +35,28 @@ public sealed class CategoryDeckTests : IClassFixture<LanGigaCardsApiFactory>
         // dildeki karşılığı ayrı alanda, istemci ikisini yan yana gösteriyor.
         Assert.Equal("Technik", deck.GetProperty("title").GetString());
         Assert.Equal("Teknoloji", deck.GetProperty("nativeTitle").GetString());
+
+        // Emoji/renk DeckTemplate'ten geliyor (CategoryCatalogSeedData'daki
+        // technology şablonu: 💻 / #06B6D4) -- istemci artık kendi 📘
+        // varsayılanına düşmeden gerçek görseli gösterebilsin diye.
+        Assert.Equal("💻", deck.GetProperty("emoji").GetString());
+        Assert.Equal("#06B6D4", deck.GetProperty("colorHex").GetString());
+    }
+
+    [Fact]
+    public async Task A_deck_the_learner_named_has_no_emoji_or_colour()
+    {
+        // Kullanıcının kendi kurduğu destenin karşılık geldiği bir şablon
+        // yok, StarterKey de null -- emoji/renk de nativeTitle gibi null
+        // dönmeli, istemci kendi varsayılanını (📘) kullanır.
+        var client = await LearnerAsync("own-deck-visuals@example.com", native: "TR", target: "DE");
+
+        var created = await client.PostAsJsonAsync("/api/Deck", new { Title = "Kendi listem", Description = string.Empty });
+        created.EnsureSuccessStatusCode();
+
+        var deck = (await client.GetFromJsonAsync<JsonElement>("/api/Deck")).EnumerateArray().Single();
+        Assert.Equal(JsonValueKind.Null, deck.GetProperty("emoji").ValueKind);
+        Assert.Equal(JsonValueKind.Null, deck.GetProperty("colorHex").ValueKind);
     }
 
     [Fact]
@@ -206,6 +228,19 @@ public sealed class CategoryDeckTests : IClassFixture<LanGigaCardsApiFactory>
             .EnumerateArray().Single().GetProperty("cardCount").GetInt32();
 
         Assert.True(after > before, $"kart sayisi artmaliydi: {before} -> {after}");
+
+        // "WLAN" (wifi) CategoryCatalogExpansionSeedData'nın technology
+        // şablonuna eklediği sekiz yeni kelimeden biri (B2, Ordinal 44) --
+        // ilk katalogun 36 üyesinde yoktu. C2'ye çıkan deste kelimeyi
+        // içeriyorsa genişletme gerçekten kurulan desteye ulaşmış demektir,
+        // yalnızca seed tablolarında kalmamış. Ayrı bir öğrenci kaydı açmak
+        // yerine bu testin zaten C2'ye çıkardığı desteyi kullanıyor --
+        // sınıftaki kayıt hız sınırı (10/15dk) sabit.
+        var deckId = (await client.GetFromJsonAsync<JsonElement>("/api/Deck"))
+            .EnumerateArray().Single().GetProperty("id").GetInt32();
+        var terms = (await client.GetFromJsonAsync<JsonElement>($"/api/Flashcard?deckId={deckId}"))
+            .EnumerateArray().Select(c => c.GetProperty("term").GetString()).ToList();
+        Assert.Contains("WLAN", terms);
     }
 
     private async Task<HttpClient> LearnerAsync(string email, string native, string target, string? proficiency = null)
