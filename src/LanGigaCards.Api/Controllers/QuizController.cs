@@ -497,7 +497,8 @@ public class QuizController : ControllerBase
         StudyEngine.ApplyXp(user, xpEarned);
         await StudyEngine.UpdateStreakAsync(_unitOfWork, user, completedAt);
 
-        var newlyUnlocked = await AchievementEvaluator.UnlockEligibleAsync(_unitOfWork, user, activities[^1]);
+        var newlyUnlocked = await AchievementEvaluator.UnlockEligibleAsync(
+            _unitOfWork, user, activities[^1], pendingQuizSession: session);
         await _unitOfWork.CompleteAsync();
 
         var completion = await ComputeCompletionAsync(user.Id, deck?.Id, languageCode);

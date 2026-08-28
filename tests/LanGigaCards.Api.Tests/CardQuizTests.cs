@@ -99,6 +99,36 @@ public sealed class CardQuizTests : IClassFixture<LanGigaCardsApiFactory>
     }
 
     [Fact]
+    public async Task A_perfect_submission_unlocks_the_Perfect_Score_achievement_in_the_same_request()
+    {
+        // Regression: the achievement check used to run before the quiz
+        // session it depends on was saved, so a query for "do I have a
+        // completed, perfect QuizSession" could never see the one that just
+        // finished -- Perfect Score could never unlock on the submission
+        // that actually earned it.
+        var (client, deckId, wordIds) = await DeckWithCardsAsync("perfect-score@example.com", 2);
+
+        var response = await client.PostAsJsonAsync("/api/Quiz/card-sessions", new
+        {
+            DeckId = deckId,
+            Answers = new object[]
+            {
+                new { WordId = wordIds[0], IsCorrect = true, Skipped = false, TimeSpentSeconds = 5 },
+                new { WordId = wordIds[1], IsCorrect = true, Skipped = false, TimeSpentSeconds = 5 }
+            }
+        });
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(100.0, body.GetProperty("accuracyPercent").GetDouble());
+
+        var unlocked = body.GetProperty("newlyUnlockedAchievements").EnumerateArray()
+            .Select(badge => badge.GetProperty("name").GetString())
+            .ToList();
+        Assert.Contains("Perfect Score", unlocked);
+    }
+
+    [Fact]
     public async Task An_empty_submission_is_rejected()
     {
         var (client, deckId, _) = await DeckWithCardsAsync("empty-quiz@example.com", 1);
