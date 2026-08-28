@@ -2516,6 +2516,14 @@
             "type": "string",
             "nullable": true
           },
+          "emoji": {
+            "type": "string",
+            "nullable": true
+          },
+          "colorHex": {
+            "type": "string",
+            "nullable": true
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -2530,6 +2538,10 @@
             "format": "int32"
           },
           "dueCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "studyCount": {
             "type": "integer",
             "format": "int32"
           },
