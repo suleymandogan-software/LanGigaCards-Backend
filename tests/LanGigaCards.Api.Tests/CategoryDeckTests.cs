@@ -243,6 +243,41 @@ public sealed class CategoryDeckTests : IClassFixture<LanGigaCardsApiFactory>
         Assert.Contains("WLAN", terms);
     }
 
+    [Fact]
+    public async Task Changing_the_app_language_away_from_the_learned_one_builds_the_missing_decks()
+    {
+        // Uygulama dili İngilizce olan biri İngilizce öğreniyor. Kart çevirisi
+        // ana dilde olduğu için eşitleme hiç deste kurmuyor: konular kayıtlı,
+        // kitaplık boş.
+        var client = await LearnerAsync("same-language@example.com", native: "GB", target: "GB");
+        (await client.PutAsJsonAsync("/api/User/languages/en/setup", new
+        {
+            ProficiencyLevel = "Intermediate",
+            CategoryIds = new[] { 4 }
+        })).EnsureSuccessStatusCode();
+
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement>("/api/Deck")).EnumerateArray());
+
+        // Uygulama dilini Türkçeye çevirmek kitaplığı doldurmalı. Eskiden
+        // profil ucu yalnızca hedef dilin değişmesine bakıyordu ve kitaplık
+        // konular yeniden kaydedilene kadar boş kalıyordu.
+        (await client.PutAsJsonAsync("/api/User/profile", new
+        {
+            FirstName = "Test",
+            LastName = "User",
+            NativeLanguageCode = "TR"
+        })).EnsureSuccessStatusCode();
+
+        var deck = (await client.GetFromJsonAsync<JsonElement>("/api/Deck")).EnumerateArray().Single();
+        Assert.Equal("category_technology_en", deck.GetProperty("starterKey").GetString());
+
+        // Yeni deste yeni ana dille kuruluyor: ön yüz İngilizce, arka yüz Türkçe.
+        var cards = (await client.GetFromJsonAsync<JsonElement>($"/api/Flashcard?deckId={deck.GetProperty("id").GetInt32()}"))
+            .EnumerateArray().ToList();
+        Assert.Contains(cards, c => c.GetProperty("term").GetString() == "Screen"
+                                    && c.GetProperty("translation").GetString() == "Ekran");
+    }
+
     private async Task<HttpClient> LearnerAsync(string email, string native, string target, string? proficiency = null)
     {
         var client = _factory.CreateClient();

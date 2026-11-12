@@ -69,6 +69,7 @@ public class UserController : ControllerBase
         }
 
         var previousTargetCode = user.TargetLanguageCode;
+        var previousNativeCode = user.NativeLanguageCode;
 
         user.FirstName = dto.FirstName.Trim();
         user.LastName = dto.LastName.Trim();
@@ -93,6 +94,13 @@ public class UserController : ControllerBase
         // satır burada açılır ve kurulumu tamamlanmamış olarak işaretlenir —
         // istemci seviye ölçümü ve kategori penceresini bu bayrağa bakarak açar.
         var languageChanged = !string.Equals(previousTargetCode, user.TargetLanguageCode, StringComparison.OrdinalIgnoreCase);
+
+        // Ana dil (istemcide "Uygulama Dili") kartların çeviri dilidir. Hedef
+        // dille aynıyken eşitleme hiç deste kurmuyor; kullanıcı uygulama dilini
+        // değiştirip bu durumdan çıktığında kitaplığın kendiliğinden dolması
+        // gerekiyor. Yalnızca hedef dile bakıldığında boş kitaplık, konular
+        // yeniden kaydedilene kadar boş kalıyordu.
+        var nativeChanged = !string.Equals(previousNativeCode, user.NativeLanguageCode, StringComparison.OrdinalIgnoreCase);
 
         // Hedef dil ana dille aynıysa profil açılmıyor: öğrenilen bir dil değil.
         // Onboarding sırasında ikisi bir an için eşit kalabiliyor ve o anda
@@ -129,7 +137,11 @@ public class UserController : ControllerBase
         // dilde seviye ve ilgi alanları henüz sorulmadı; deste kurmak için
         // kurulum penceresinin sonucunu bekliyoruz
         // (PUT /api/User/languages/{code}/setup).
-        if (languageChanged && languageProfile?.IsSetupCompleted == true)
+        //
+        // Ana dil değişince yalnızca eksik desteler yeni dille kuruluyor; var
+        // olan kartların çevirisi kart oluşturulurken yazıldığı için eski dilde
+        // kalıyor (Vocabulary kavramına bağlı değil, yeniden çevrilemiyor).
+        if ((languageChanged || nativeChanged) && languageProfile?.IsSetupCompleted == true)
         {
             await CategoryDeckSynchronizer.SyncAsync(_unitOfWork, userId.Value);
         }
